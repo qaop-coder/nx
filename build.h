@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #ifdef _WIN32
 #    define WIN32_LEAN_AND_MEAN
@@ -13,6 +14,7 @@
 #    include <sys/stat.h>
 #    include <windows.h>
 #else
+#    include <dirent.h>
 #    include <sys/stat.h>
 #endif
 
@@ -399,6 +401,42 @@ static void files_list_recursive(Arena* arena,
         } while (FindNextFileA(find_handle, &find_data));
         FindClose(find_handle);
     }
+#elif defined(__linux__) || defined(__APPLE__)
+    DIR* dir = opendir(directory);
+    if (dir) {
+        struct dirent* entry;
+        while ((entry = readdir(dir)) != NULL) {
+            if (strcmp(entry->d_name, ".") != 0 &&
+                strcmp(entry->d_name, "..") != 0) {
+                StringBuilder file_sb = string_builder_init(arena);
+                string_builder_append_zstring(&file_sb, directory);
+                string_builder_append_zstring(&file_sb, "/");
+                string_builder_append_zstring(&file_sb, entry->d_name);
+
+                // Check if it's a directory
+                struct stat st;
+                if (stat(file_sb.str.data, &st) == 0) {
+                    if (S_ISDIR(st.st_mode)) {
+                        // If it's a directory and recursive, list files inside
+                        // it
+                        if (recursive) {
+                            files_list_recursive(
+                                arena, files, file_sb.str.data, recursive);
+                        }
+                    } else if (S_ISREG(st.st_mode)) {
+                        // Only add regular files, not directories
+                        array_push(*files, file_sb.str);
+                    }
+                }
+            }
+        }
+        closedir(dir);
+    } else {
+        fprintf(stderr, "Failed to open directory: %s\n", directory);
+        exit(EXIT_FAILURE);
+    }
+#else
+#    error "File listing not implemented on this platform"
 #endif // _WIN32
 }
 
@@ -579,9 +617,11 @@ void compile_project(const char*  exe_name,
     compile_info_add_folder(&info, source_folder, true);
     compile_info_output_folder(&info, output_folder);
     compile_info_debug(&info);
-    while (*libraries) {
-        compile_info_add_library(&info, *libraries);
-        libraries++;
+    if (libraries) {
+        while (*libraries) {
+            compile_info_add_library(&info, *libraries);
+            libraries++;
+        }
     }
     compile(&info);
 }
@@ -679,4 +719,24 @@ void build_check(int argc, char** argv)
 
         arena_free(&temp_arena);
     }
+}
+
+typedef enum {
+    Platform_Windows,
+    Platform_Linux,
+    Platform_MacOS,
+    Platform_Unknown
+} Platform;
+
+Platform build_platform()
+{
+#ifdef _WIN32
+    return Platform_Windows;
+#elif defined(__linux__)
+    return Platform_Linux;
+#elif defined(__APPLE__)
+    return Platform_MacOS;
+#else
+    return Platform_Unknown;
+#endif
 }

@@ -4,6 +4,13 @@
 
 #include "data.h"
 
+#if OS_LINUX
+#    include <fcntl.h>
+#    include <sys/mman.h>
+#    include <sys/stat.h>
+#    include <unistd.h>
+#endif // OS_LINUX
+
 Data data_load(const char* filename)
 {
     Data data = {0};
@@ -44,6 +51,25 @@ Data data_load(const char* filename)
         CloseHandle(data.file_handle);
         return data;
     }
+#elif OS_LINUX
+    data.fd = open(filename, O_RDONLY);
+    if (data.fd < 0) {
+        fprintf(stderr, "Error opening file: %s\n", filename);
+        return data;
+    }
+    struct stat st;
+    if (fstat(data.fd, &st) < 0) {
+        fprintf(stderr, "Error getting file size: %s\n", filename);
+        close(data.fd);
+        return data;
+    }
+    data.size = st.st_size;
+    data.data = (u8*)mmap(NULL, data.size, PROT_READ, MAP_PRIVATE, data.fd, 0);
+    if (data.data == MAP_FAILED) {
+        fprintf(stderr, "Error mapping file: %s\n", filename);
+        close(data.fd);
+        return data;
+    }
 #else
 #    error "File mapping not implemented for this OS"
 #endif
@@ -64,6 +90,13 @@ void data_unload(Data* data)
     }
     if (data->file_handle) {
         CloseHandle(data->file_handle);
+    }
+#elif OS_LINUX
+    if (data->data) {
+        munmap(data->data, data->size);
+    }
+    if (data->fd >= 0) {
+        close(data->fd);
     }
 #else
 #    error "File mapping not implemented for this OS"

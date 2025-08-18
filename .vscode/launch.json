@@ -6,12 +6,17 @@
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceFolder}/_bin/nx.exe",
+            // "program": "${workspaceRoot}/build",
             "args": [],
             "cwd": "${workspaceFolder}",
             "environment": [],
             // "preLaunchTask": "Build C Project",
             "console": "integratedTerminal",
-            "preLaunchTask": "Build C Project"
+            "preLaunchTask": "Build C Project",
+            "linux": {
+                "type": "cppdbg",
+                "program": "${workspaceRoot}/_bin/nx"
+            }
         }
     ]
 }

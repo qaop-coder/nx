@@ -2,7 +2,7 @@ default:
     just --list
 
 bootstrap:
-    clang -std=c23 -o build build.c
+    clang -std=c23 -g -o build build.c
 
 build:
     ./build

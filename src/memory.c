@@ -6,6 +6,7 @@
 #include "data.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 void mem_init(Memory* memory)
 {

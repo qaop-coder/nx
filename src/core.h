@@ -35,6 +35,9 @@
 #if OS_WINDOWS
 #    define WIN32_LEAN_AND_MEAN
 #    include <windows.h>
+#elif OS_LINUX
+#    include <X11/Xlib.h>
+#    include <X11/Xutil.h>
 #endif
 
 //------------------------------------------------------------------------------

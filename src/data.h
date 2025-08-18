@@ -13,6 +13,8 @@ typedef struct {
 #if OS_WINDOWS
     HANDLE file_handle;
     HANDLE mapping_handle;
+#elif OS_LINUX
+    int fd;
 #else
 #    error "File mapping not implemented for this OS"
 #endif

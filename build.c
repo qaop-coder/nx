@@ -9,7 +9,22 @@ int main(int argc, char** argv)
         run = true;
     }
 
-    const char* libraries[] = {"gdi32", "user32", 0};
+    const char** libraries;
+
+    switch (build_platform()) {
+    case Platform_Windows:
+        libraries = (const char*[]){"user32", "gdi32", 0};
+        break;
+    case Platform_Linux:
+        libraries = (const char*[]){"X11", 0};
+        break;
+    case Platform_MacOS:
+        libraries = (const char*[]){"Cocoa", 0};
+        break;
+    default:
+        fprintf(stderr, "Unsupported platform.\n");
+        return EXIT_FAILURE;
+    }
     compile_project("nx", "src", libraries, "_bin");
 
     if (run) {

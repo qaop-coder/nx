@@ -1,5 +1,5 @@
 //------------------------------------------------------------------------------
-// Window implementation for Win32
+// Frame implementation for Win32
 //------------------------------------------------------------------------------
 
 #include "core.h"
@@ -15,7 +15,7 @@ static LRESULT CALLBACK WindowProc(HWND   hwnd,
                                    WPARAM wParam,
                                    LPARAM lParam)
 {
-    Window* w = (Window*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+    Frame* w = (Frame*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
     switch (msg) {
     case WM_PAINT:
         {
@@ -72,7 +72,7 @@ static LRESULT CALLBACK WindowProc(HWND   hwnd,
     return 0;
 }
 
-void win_open(Window* w)
+void win_open(Frame* w)
 {
     HINSTANCE  instance = GetModuleHandle(NULL);
     WNDCLASSEX wc       = {
@@ -106,7 +106,7 @@ void win_open(Window* w)
     SetWindowLongPtr(w->hwnd, GWLP_USERDATA, (LONG_PTR)w);
 }
 
-bool win_loop(Window* w)
+bool win_loop(Frame* w)
 {
     MSG msg;
     while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {

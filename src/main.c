@@ -7,8 +7,8 @@ int main(int argc, char** argv)
     Memory memory = {0};
     mem_init(&memory);
 
-    u32    screen[WINDOW_WIDTH * WINDOW_HEIGHT] = {0};
-    Window main_window                          = {
+    u32   screen[WINDOW_WIDTH * WINDOW_HEIGHT] = {0};
+    Frame main_window                          = {
                                  .title  = "Nx (Dev.9)",
                                  .width  = WINDOW_WIDTH,
                                  .height = WINDOW_HEIGHT,
@@ -22,6 +22,8 @@ int main(int argc, char** argv)
 
     while (win_loop(&main_window)) {
     }
+
+    printf("Exiting...\n");
 
     mem_done(&memory);
     return 0;

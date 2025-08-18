@@ -19,14 +19,19 @@ typedef struct {
 
 #if OS_WINDOWS
     HWND hwnd;
+#elif OS_LINUX
+    Display* display;
+    Window   window;
+    GC       gc;
+    XImage*  image;
 #else
 #    error "Unsupported OS"
 #endif
-} Window;
+} Frame;
 
 //------------------------------------------------------------------------------
 // Window API
 //------------------------------------------------------------------------------
 
-void win_open(Window* w);
-bool win_loop(Window* w);
+void win_open(Frame* w);
+bool win_loop(Frame* w);
