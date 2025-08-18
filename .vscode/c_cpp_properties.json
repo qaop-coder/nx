@@ -1,0 +1,15 @@
+{
+    "configurations": [
+        {
+            "name": "C Code",
+            "includePath": [
+                "${workspaceFolder}/**"
+            ],
+            "defines": [
+                "_DEBUG",
+            ],
+            "cStandard": "c23"
+        }
+    ],
+    "version": 4
+}

@@ -1,11 +1,10 @@
-#include <stdio.h>
+#include "memory.h"
 
 int main(int argc, char** argv)
 {
-    (void)argc; // Unused parameter
-    (void)argv; // Unused parameter
+    Memory memory = {0};
+    mem_init(&memory);
 
-    printf("Hello, World!\n");
-
+    mem_done(&memory);
     return 0;
 }
