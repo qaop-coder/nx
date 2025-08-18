@@ -415,7 +415,7 @@ Array(String) files_list(Arena* arena, const char* directory, bool recursive)
 
 i32 build_run(String command)
 {
-    // printf("Running command: %.*s\n", (int)command.length, command.data);
+    printf("Running command: %.*s\n", STRINGV(command));
 
     char* command_buffer = (char*)memory_alloc(command.length + 1);
     memcpy(command_buffer, command.data, command.length);
@@ -462,6 +462,7 @@ i32 build_run(String command)
 typedef struct {
     Arena* arena;
     Array(String) files;
+    Array(String) libraries;
     bool   debug;
     String output_file;
     String output_folder;
@@ -472,6 +473,7 @@ CompileInfo compile_info_init(Arena* arena, const char* output_file)
     CompileInfo info;
     info.arena       = arena;
     info.files       = nullptr;
+    info.libraries   = nullptr;
     info.debug       = false;
 
     StringBuilder sb = string_builder_init(arena);
@@ -491,6 +493,13 @@ void compile_info_add_file(CompileInfo* info, const char* file)
     StringBuilder sb = string_builder_init(info->arena);
     string_builder_append_zstring(&sb, file);
     array_push(info->files, sb.str);
+}
+
+void compile_info_add_library(CompileInfo* info, const char* library)
+{
+    StringBuilder sb = string_builder_init(info->arena);
+    string_builder_append_zstring(&sb, library);
+    array_push(info->libraries, sb.str);
 }
 
 void compile_info_add_folder(CompileInfo* info,
@@ -529,6 +538,7 @@ void compile_info_output_folder(CompileInfo* info, const char* folder)
 
 void compile(CompileInfo* info)
 {
+    printf("Compiling project...\n");
     StringBuilder sb = string_builder_init(info->arena);
     string_builder_append_zstring(&sb, "mkdir -p ");
     string_builder_append_string(&sb, info->output_folder);
@@ -545,6 +555,11 @@ void compile(CompileInfo* info)
         string_builder_append_zstring(&sb, " -g");
     }
 
+    for (usize i = 0; i < array_length(info->libraries); ++i) {
+        string_builder_append_zstring(&sb, " -l");
+        string_builder_append_string(&sb, info->libraries[i]);
+    }
+
     for (usize i = 0; i < array_length(info->files); ++i) {
         string_builder_append_zstring(&sb, " ");
         string_builder_append_string(&sb, info->files[i]);
@@ -554,15 +569,20 @@ void compile(CompileInfo* info)
     build_run(sb.str);
 }
 
-void compile_project(const char* exe_name,
-                     const char* source_folder,
-                     const char* output_folder)
+void compile_project(const char*  exe_name,
+                     const char*  source_folder,
+                     const char** libraries,
+                     const char*  output_folder)
 {
     Arena       temp_arena = arena_init();
     CompileInfo info       = compile_info_init(&temp_arena, exe_name);
     compile_info_add_folder(&info, source_folder, true);
     compile_info_output_folder(&info, output_folder);
     compile_info_debug(&info);
+    while (*libraries) {
+        compile_info_add_library(&info, *libraries);
+        libraries++;
+    }
     compile(&info);
 }
 

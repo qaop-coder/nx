@@ -9,7 +9,8 @@ int main(int argc, char** argv)
         run = true;
     }
 
-    compile_project("nx", "src", "_bin");
+    const char* libraries[] = {"gdi32", "user32", 0};
+    compile_project("nx", "src", libraries, "_bin");
 
     if (run) {
         String exe_file = string_view("_bin/nx");
