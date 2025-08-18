@@ -8,6 +8,39 @@
 #include <stdint.h>
 #include <stdio.h>
 
+//------------------------------------------------------------------------------
+// OS determination
+//------------------------------------------------------------------------------
+
+#define YES (1)
+#define NO (0)
+
+#define OS_WINDOWS NO
+#define OS_LINUX NO
+#define OS_MACOS NO
+
+#if defined(_WIN32) || defined(_WIN64)
+#    undef OS_WINDOWS
+#    define OS_WINDOWS YES
+#elif defined(__linux__)
+#    undef OS_LINUX
+#    define OS_LINUX YES
+#elif defined(__APPLE__) || defined(__MACH__)
+#    undef OS_MACOS
+#    define OS_MACOS YES
+#else
+#    error "Unsupported operating system"
+#endif
+
+#if OS_WINDOWS
+#    define WIN32_LEAN_AND_MEAN
+#    include <windows.h>
+#endif
+
+//------------------------------------------------------------------------------
+// Basic types
+//------------------------------------------------------------------------------
+
 typedef int8_t  i8;
 typedef int16_t i16;
 typedef int32_t i32;

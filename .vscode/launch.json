@@ -1,0 +1,17 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug build.exe",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/_bin/nx.exe",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            // "preLaunchTask": "Build C Project",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build C Project"
+        }
+    ]
+}

@@ -3,6 +3,7 @@
 //------------------------------------------------------------------------------
 
 #include "memory.h"
+#include "data.h"
 
 #include <stdlib.h>
 
@@ -10,6 +11,10 @@ void mem_init(Memory* memory)
 {
     memory->ram = (u8*)malloc(65536); // Allocate 64KB of RAM
     CHECK_MEMORY(memory->ram);
+
+    for (u32 i = 0; i < 65536; i++) {
+        memory->ram[i] = 0xff;
+    }
 }
 
 void mem_done(Memory* memory)
@@ -44,8 +49,18 @@ u16 mem_peek16(Memory* memory, u16 addr)
 void mem_load(Memory* memory, u16 addr, const u8* data, u16 size)
 {
     if (addr + size <= 65536 && data != NULL) {
-        for (u16 i = 0; i < size; i++) {
-            mem_poke(memory, addr + i, data[i]);
-        }
+        memcpy(memory->ram + addr, data, size);
+    }
+}
+
+void mem_load_file(Memory* memory, u16 addr, const char* filename)
+{
+    Data data = data_load(filename);
+    if (data_loaded(&data)) {
+        mem_load(memory, addr, data.data, (u16)data.size);
+        data_unload(&data);
+    } else {
+        fprintf(stderr, "Failed to load file: %s\n", filename);
+        exit(EXIT_FAILURE);
     }
 }
