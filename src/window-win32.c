@@ -90,7 +90,7 @@ void win_open(Frame* f)
               .style         = CS_HREDRAW | CS_VREDRAW,
               .lpfnWndProc   = WindowProc,
               .hInstance     = instance,
-              .lpszClassName = w->title,
+              .lpszClassName = f->title,
     };
 
     RegisterClassEx(&wc);
@@ -98,7 +98,7 @@ void win_open(Frame* f)
     RECT rc = {0, 0, win_w, win_h};
     AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
 
-    w->hwnd = CreateWindowEx(WS_EX_CLIENTEDGE,
+    f->hwnd = CreateWindowEx(WS_EX_CLIENTEDGE,
                              f->title,
                              f->title,
                              WS_OVERLAPPEDWINDOW | WS_VISIBLE,
@@ -116,7 +116,7 @@ void win_open(Frame* f)
         exit(EXIT_FAILURE);
     }
 
-    SetWindowLongPtr(w->hwnd, GWLP_USERDATA, (LONG_PTR)w);
+    SetWindowLongPtr(f->hwnd, GWLP_USERDATA, (LONG_PTR)f);
 }
 
 bool win_loop(Frame* w)
