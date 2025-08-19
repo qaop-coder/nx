@@ -590,7 +590,7 @@ i32 compile(CompileInfo* info)
     string_builder_append_string(&sb, info->output_file);
 
     if (info->debug) {
-        string_builder_append_zstring(&sb, " -g");
+        string_builder_append_zstring(&sb, " -g -DDEBUG");
     }
 
     for (usize i = 0; i < array_length(info->libraries); ++i) {

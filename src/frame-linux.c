@@ -37,7 +37,7 @@ static void win_cleanup(Frame* f)
     }
 }
 
-void win_open(Frame* f)
+void frame_open(Frame* f)
 {
     f->display = XOpenDisplay(NULL);
     if (f->display == NULL) {
@@ -139,7 +139,7 @@ static void win_draw(Frame* f)
     XFlush(f->display);
 }
 
-bool win_loop(Frame* f)
+bool frame_loop(Frame* f)
 {
     XEvent event;
     win_draw(f);

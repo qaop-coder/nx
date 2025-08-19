@@ -5,13 +5,9 @@
 #include "memory.h"
 #include "data.h"
 
-#include <stdlib.h>
-#include <string.h>
-
 void mem_init(Memory* memory)
 {
-    memory->ram = (u8*)malloc(65536); // Allocate 64KB of RAM
-    CHECK_MEMORY(memory->ram);
+    memory->ram = ALLOC_ARRAY(u8, 65536); // Allocate 64KB of RAM
 
     for (u32 i = 0; i < 65536; i++) {
         memory->ram[i] = 0xff;
@@ -20,7 +16,7 @@ void mem_init(Memory* memory)
 
 void mem_done(Memory* memory)
 {
-    free(memory->ram);
+    FREE_ARRAY(memory->ram);
     memory->ram = NULL; // Set pointer to NULL after freeing
 }
 
