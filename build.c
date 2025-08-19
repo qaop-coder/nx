@@ -13,7 +13,7 @@ int main(int argc, char** argv)
 
     switch (build_platform()) {
     case Platform_Windows:
-        libraries = (const char*[]){"user32", "gdi32", 0};
+        libraries = (const char*[]){"user32", "gdi32", "opengl32", 0};
         break;
     case Platform_Linux:
         libraries = (const char*[]){"X11", 0};
