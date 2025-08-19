@@ -574,7 +574,7 @@ void compile_info_output_folder(CompileInfo* info, const char* folder)
     info->output_folder = sb.str;
 }
 
-void compile(CompileInfo* info)
+i32 compile(CompileInfo* info)
 {
     printf("Compiling project...\n");
     StringBuilder sb = string_builder_init(info->arena);
@@ -604,13 +604,13 @@ void compile(CompileInfo* info)
     }
 
     string_builder_null_terminate(&sb);
-    build_run(sb.str);
+    return build_run(sb.str);
 }
 
-void compile_project(const char*  exe_name,
-                     const char*  source_folder,
-                     const char** libraries,
-                     const char*  output_folder)
+i32 compile_project(const char*  exe_name,
+                    const char*  source_folder,
+                    const char** libraries,
+                    const char*  output_folder)
 {
     Arena       temp_arena = arena_init();
     CompileInfo info       = compile_info_init(&temp_arena, exe_name);
@@ -623,7 +623,7 @@ void compile_project(const char*  exe_name,
             libraries++;
         }
     }
-    compile(&info);
+    return compile(&info);
 }
 
 //

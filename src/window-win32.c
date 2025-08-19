@@ -15,46 +15,50 @@ static LRESULT CALLBACK WindowProc(HWND   hwnd,
                                    WPARAM wParam,
                                    LPARAM lParam)
 {
-    Frame* w = (Frame*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+    Frame* f = (Frame*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
     switch (msg) {
     case WM_PAINT:
         {
             PAINTSTRUCT ps;
-            HDC         hdc   = BeginPaint(hwnd, &ps);
-            HDC         memdc = CreateCompatibleDC(hdc);
-            HBITMAP     hbmp = CreateCompatibleBitmap(hdc, w->width, w->height);
-            HBITMAP     oldbmp = SelectObject(memdc, hbmp);
+            HDC         hdc = BeginPaint(hwnd, &ps);
 
-            BITMAPINFO bi      = {
-                     .bmiHeader =
-                    {
-                             .biSize  = sizeof(BITMAPINFOHEADER),
-                             .biWidth = w->width,
-                             .biHeight =
-                            -w->height, // Negative to indicate top-down bitmap
-                             .biPlanes      = 1,
-                             .biBitCount    = 32,
-                             .biCompression = BI_RGB,
-                    },
-            };
+            if (f && f->buf) {
+                if (f->scale <= 0) {
+                    f->scale = 1; // Default scale
+                }
+                int win_w     = f->width * f->scale;
+                int win_h     = f->height * f->scale;
 
-            SetDIBitsToDevice(memdc,
+                BITMAPINFO bi = {
+                    .bmiHeader =
+                        {
+                            .biSize        = sizeof(BITMAPINFOHEADER),
+                            .biWidth       = f->width,
+                            .biHeight      = -f->height, // Negative to indicate
+                                                         // top-down bitmap
+                            .biPlanes      = 1,
+                            .biBitCount    = 32,
+                            .biCompression = BI_RGB,
+                        },
+                };
+
+                SetStretchBltMode(hdc, COLORONCOLOR);
+                StretchDIBits(hdc,
                               0,
                               0,
-                              w->width,
-                              w->height,
+                              win_w,
+                              win_h,
                               0,
                               0,
-                              0,
-                              w->height,
-                              w->buf,
+                              f->width,
+                              f->height,
+                              f->buf,
                               &bi,
-                              DIB_RGB_COLORS);
-            BitBlt(hdc, 0, 0, w->width, w->height, memdc, 0, 0, SRCCOPY);
-            SelectObject(memdc, oldbmp);
-            DeleteObject(hbmp);
-            DeleteDC(memdc);
-            EndPaint(hwnd, &ps);
+                              DIB_RGB_COLORS,
+                              SRCCOPY);
+
+                EndPaint(hwnd, &ps);
+            }
         }
         break;
 
@@ -72,8 +76,14 @@ static LRESULT CALLBACK WindowProc(HWND   hwnd,
     return 0;
 }
 
-void win_open(Frame* w)
+void win_open(Frame* f)
 {
+    if (f->scale <= 0) {
+        f->scale = 1; // Default scale
+    }
+    int win_w           = f->width * f->scale;
+    int win_h           = f->height * f->scale;
+
     HINSTANCE  instance = GetModuleHandle(NULL);
     WNDCLASSEX wc       = {
               .cbSize        = sizeof(WNDCLASSEX),
@@ -85,20 +95,23 @@ void win_open(Frame* w)
 
     RegisterClassEx(&wc);
 
+    RECT rc = {0, 0, win_w, win_h};
+    AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
+
     w->hwnd = CreateWindowEx(WS_EX_CLIENTEDGE,
-                             w->title,
-                             w->title,
+                             f->title,
+                             f->title,
                              WS_OVERLAPPEDWINDOW | WS_VISIBLE,
                              CW_USEDEFAULT,
                              CW_USEDEFAULT,
-                             w->width,
-                             w->height,
+                             rc.right - rc.left,
+                             rc.bottom - rc.top,
                              NULL,
                              NULL,
                              instance,
                              NULL);
 
-    if (w->hwnd == NULL) {
+    if (f->hwnd == NULL) {
         fprintf(stderr, "Failed to create window: %ld\n", GetLastError());
         exit(EXIT_FAILURE);
     }

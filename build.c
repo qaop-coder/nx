@@ -25,7 +25,10 @@ int main(int argc, char** argv)
         fprintf(stderr, "Unsupported platform.\n");
         return EXIT_FAILURE;
     }
-    compile_project("nx", "src", libraries, "_bin");
+    if (compile_project("nx", "src", libraries, "_bin")) {
+        fprintf(stderr, "Compilation failed. Please check the output above.\n");
+        return EXIT_FAILURE;
+    }
 
     if (run) {
         String exe_file = string_view("_bin/nx");

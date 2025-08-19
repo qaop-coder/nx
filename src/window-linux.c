@@ -46,12 +46,14 @@ void win_open(Frame* f)
     }
 
     int screen_num = DefaultScreen(f->display);
+    int win_w      = f->width * f->scale;
+    int win_h      = f->height * f->scale;
     f->window      = XCreateSimpleWindow(f->display,
                                     RootWindow(f->display, screen_num),
                                     0,
                                     0,
-                                    f->width,
-                                    f->height,
+                                    win_w,
+                                    win_h,
                                     1,
                                     BlackPixel(f->display, screen_num),
                                     WhitePixel(f->display, screen_num));
@@ -68,41 +70,84 @@ void win_open(Frame* f)
 
     f->gc = XCreateGC(f->display, f->window, 0, NULL);
     XSync(f->display, f->window);
+
+    int   img_w  = win_w;
+    int   img_h  = win_h;
+    char* pixels = (char*)malloc((size_t)img_w * img_h * 4);
+    if (!pixels) {
+        fprintf(stderr, "Failed to allocate memory for image pixels\n");
+        exit(EXIT_FAILURE);
+    }
     f->image = XCreateImage(f->display,
                             DefaultVisual(f->display, screen_num),
                             DefaultDepth(f->display, screen_num),
                             ZPixmap,
                             0,
-                            (char*)f->buf,
-                            f->width,
-                            f->height,
+                            pixels,
+                            img_w,
+                            img_h,
                             32,
                             0);
     if (f->image == NULL) {
         fprintf(stderr, "Failed to create XImage\n");
+        free(pixels);
         exit(EXIT_FAILURE);
     }
 
     XFlush(f->display);
 }
 
+static void win_draw(Frame* f)
+{
+    if (!f->image) {
+        return;
+    }
+
+    const int scale = (f->scale <= 0) ? 1 : f->scale;
+    const int src_w = f->width;
+    const int src_h = f->height;
+    const int dst_w = src_w * scale;
+    // const int dst_h = src_h * scale;
+
+    const u32* src  = (const u32*)f->buf;
+    u32*       dst  = (u32*)f->image->data;
+
+    // Nearest-neighbor scale (pixel replication)
+    for (int y = 0; y < src_h; ++y) {
+        const u32* src_row = src + y * src_w;
+        for (int sy = 0; sy < scale; ++sy) {
+            u32* dst_row = dst + (y * scale + sy) * dst_w;
+            for (int x = 0; x < src_w; ++x) {
+                u32 px = src_row[x];
+                for (int sx = 0; sx < scale; ++sx) {
+                    dst_row[x * scale + sx] = px;
+                }
+            }
+        }
+    }
+
+    XPutImage(f->display,
+              f->window,
+              f->gc,
+              f->image,
+              0,
+              0,
+              0,
+              0,
+              f->image->width,
+              f->image->height);
+    XFlush(f->display);
+}
+
 bool win_loop(Frame* f)
 {
     XEvent event;
+    win_draw(f);
     while (XPending(f->display)) {
         XNextEvent(f->display, &event);
         switch (event.type) {
         case Expose:
-            XPutImage(f->display,
-                      f->window,
-                      f->gc,
-                      f->image,
-                      0,
-                      0,
-                      0,
-                      0,
-                      f->width,
-                      f->height);
+            win_draw(f);
             break;
 
         case ClientMessage:
