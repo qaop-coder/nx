@@ -16,6 +16,11 @@ typedef struct {
     int         width;
     int         height;
     Array(GfxLayer*) layers;
+    
+    // FPS tracking
+    TimePoint last_time;
+    u64       frame_count;
+    f64       fps;
 
 #if OS_WINDOWS
     HWND  hwnd;
@@ -38,3 +43,4 @@ typedef struct {
 Frame frame_open(int width, int height, const char* title);
 bool  frame_loop(Frame* w);
 u32*  frame_add_layer(Frame* w, int width, int height);
+f64   frame_fps(Frame* w);

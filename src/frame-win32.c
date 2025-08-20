@@ -128,6 +128,12 @@ Frame frame_open(int width, int height, const char* title)
         exit(EXIT_FAILURE);
     }
 
+    if (!wglMakeCurrent(f.hdc, f.hglrc)) {
+        fprintf(stderr, "Failed to activate OpenGL context: %ld\n", GetLastError());
+        frame_cleanup(&f);
+        exit(EXIT_FAILURE);
+    }
+
     if (!gfx_init()) {
         fprintf(stderr, "Failed to initialize graphics system\n");
         frame_cleanup(&f);
@@ -158,6 +164,9 @@ bool frame_loop(Frame* f)
     int win_w = cr.right - cr.left;
     int win_h = cr.bottom - cr.top;
 
+    // Update OpenGL context before rendering
+    wglMakeCurrent(f->hdc, f->hglrc);
+    
     gfx_render(f->layers, array_length(f->layers), win_w, win_h);
     SwapBuffers(f->hdc);
     return true;

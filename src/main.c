@@ -33,6 +33,12 @@ int main(int argc, char** argv)
             }
         }
         frame++;
+        
+        // Calculate FPS every frame, but display every 60 frames
+        f64 fps = frame_fps(&main_window);
+        if (frame % 60 == 0) {
+            printf("FPS: %.1f\n", fps);
+        }
     }
 
     printf("Exiting...\n");

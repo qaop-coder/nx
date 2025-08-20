@@ -145,6 +145,24 @@ void* __array_maybe_grow(void* arr, u64 element_size, u64 new_capacity);
     (arr) = memory_free(__array_info(arr), __FILE__, __LINE__)
 
 //------------------------------------------------------------------------------
+// Cross-platform timing
+//------------------------------------------------------------------------------
+
+typedef struct {
+    u64 ticks;
+} TimePoint;
+
+typedef struct {
+    u64 ticks;
+} TimePeriod;
+
+TimePoint  time_now(void);
+TimePeriod time_period(TimePoint start, TimePoint end);
+f64        time_secs(TimePeriod period);
+f64        time_ms(TimePeriod period);
+f64        time_us(TimePeriod period);
+
+//------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
 // I M P L E M E N T A T I O N
 //------------------------------------------------------------------------------
@@ -454,6 +472,55 @@ u64 memory_size(void* ptr)
 
     MemoryInfo* info = (MemoryInfo*)ptr - 1;
     return info->size;
+}
+
+//------------------------------------------------------------------------------
+// Cross-platform timing implementation
+//------------------------------------------------------------------------------
+
+TimePoint time_now(void)
+{
+    TimePoint tp;
+#if OS_WINDOWS
+    LARGE_INTEGER counter;
+    QueryPerformanceCounter(&counter);
+    tp.ticks = (u64)counter.QuadPart;
+#elif OS_LINUX || OS_MACOS
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    tp.ticks = (u64)ts.tv_sec * 1000000000ULL + (u64)ts.tv_nsec;
+#else
+#error "Unsupported platform for timing"
+#endif
+    return tp;
+}
+
+TimePeriod time_period(TimePoint start, TimePoint end)
+{
+    TimePeriod period;
+    period.ticks = end.ticks - start.ticks;
+    return period;
+}
+
+f64 time_secs(TimePeriod period)
+{
+#if OS_WINDOWS
+    LARGE_INTEGER freq;
+    QueryPerformanceFrequency(&freq);
+    return (f64)period.ticks / (f64)freq.QuadPart;
+#elif OS_LINUX || OS_MACOS
+    return (f64)period.ticks / 1000000000.0;
+#endif
+}
+
+f64 time_ms(TimePeriod period)
+{
+    return time_secs(period) * 1000.0;
+}
+
+f64 time_us(TimePeriod period)
+{
+    return time_secs(period) * 1000000.0;
 }
 
 //------------------------------------------------------------------------------

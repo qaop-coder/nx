@@ -21,9 +21,10 @@
 // ---------- Internal Structures ----------
 
 struct GfxLayer {
-    int    w, h;
-    GLuint tex;
-    bool   enabled;
+    int       w, h;
+    GLuint    tex;
+    bool      enabled;
+    uint32_t* pixels; // Reference to external pixel buffer
 };
 
 // Single shared shader & geometry
@@ -524,6 +525,7 @@ GfxLayer* gfx_layer_create(int width, int height, const uint32_t* rgba_pixels)
     L->w       = width;
     L->h       = height;
     L->enabled = true;
+    L->pixels  = (uint32_t*)rgba_pixels; // Store reference to pixel buffer
     L->tex     = create_texture(width, height, rgba_pixels);
     return L;
 }
@@ -579,9 +581,10 @@ bool gfx_layer_resize(GfxLayer*       layer,
     if (layer->tex) {
         glDeleteTextures(1, &layer->tex);
     }
-    layer->w   = new_w;
-    layer->h   = new_h;
-    layer->tex = create_texture(new_w, new_h, rgba_pixels);
+    layer->w      = new_w;
+    layer->h      = new_h;
+    layer->pixels = (uint32_t*)rgba_pixels; // Update pixel buffer reference
+    layer->tex    = create_texture(new_w, new_h, rgba_pixels);
     return layer->tex != 0;
 }
 
@@ -619,6 +622,11 @@ void gfx_render(GfxLayer** layers,
         GfxLayer* L = layers[i];
         if (!L || !L->enabled) {
             continue;
+        }
+        
+        // Update texture with current pixel data
+        if (L->pixels) {
+            gfx_layer_update_pixels(L, L->pixels);
         }
 
         float scale_w   = (float)window_width / (float)L->w;
