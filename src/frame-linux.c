@@ -2,9 +2,9 @@
 // Frame implementation for Linux (X11)
 //------------------------------------------------------------------------------
 
-#include "core.h"
+#include "kore.h"
 
-#if OS_LINUX
+#if KORE_OS_LINUX
 
 #    include "window.h"
 
@@ -13,7 +13,7 @@
 
 static Atom g_wm_delete_window = None;
 
-static void win_cleanup(Frame* f)
+static void frame_cleanup(Frame* f)
 {
     if (!f) {
         return;
@@ -152,13 +152,13 @@ bool frame_loop(Frame* f)
 
         case ClientMessage:
             if ((Atom)event.xclient.data.l[0] == g_wm_delete_window) {
-                win_cleanup(f);
+                frame_cleanup(f);
                 return false; // Exit the loop
             }
             break;
 
         case DestroyNotify:
-            win_cleanup(f);
+            frame_cleanup(f);
             return false; // Exit the loop
 
         case KeyPress:

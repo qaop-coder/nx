@@ -1,5 +1,5 @@
-#define CORE_IMPLEMENTATION
-#include "core.h"
+#define KORE_IMPLEMENTATION
+#include "kore.h"
 
 #include "config.h"
 #include "frame.h"
@@ -11,6 +11,9 @@
 
 int main(int argc, char** argv)
 {
+    $.init();
+    $.memory_break_on(5);
+
     Memory memory = {0};
     mem_init(&memory);
 
@@ -82,6 +85,10 @@ int main(int argc, char** argv)
 
     printf("Exiting...\n");
 
+    frame_free_pixels(screen);
+    frame_free_pixels(overlay);
+
     mem_done(&memory);
+    $.done();
     return 0;
 }

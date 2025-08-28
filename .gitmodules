@@ -1,0 +1,3 @@
+[submodule "3rd/kore"]
+	path = 3rd/kore
+	url = https://github.com/qaop-coder/kore.git

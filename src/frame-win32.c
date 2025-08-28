@@ -2,9 +2,9 @@
 // Frame implementation for Win32
 //------------------------------------------------------------------------------
 
-#include "core.h"
+#include "kore.h"
 
-#if OS_WINDOWS
+#if KORE_OS_WINDOWS
 
 #    include "frame.h"
 
@@ -129,7 +129,8 @@ Frame frame_open(int width, int height, const char* title)
     }
 
     if (!wglMakeCurrent(f.hdc, f.hglrc)) {
-        fprintf(stderr, "Failed to activate OpenGL context: %ld\n", GetLastError());
+        fprintf(
+            stderr, "Failed to activate OpenGL context: %ld\n", GetLastError());
         frame_cleanup(&f);
         exit(EXIT_FAILURE);
     }
@@ -148,6 +149,7 @@ bool frame_loop(Frame* f)
     MSG msg;
     while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
         if (msg.message == WM_QUIT) {
+            frame_cleanup(f);
             return false;
         }
         TranslateMessage(&msg);
@@ -166,7 +168,7 @@ bool frame_loop(Frame* f)
 
     // Update OpenGL context before rendering
     wglMakeCurrent(f->hdc, f->hglrc);
-    
+
     gfx_render(f->layers, array_length(f->layers), win_w, win_h);
     SwapBuffers(f->hdc);
     return true;
@@ -174,14 +176,14 @@ bool frame_loop(Frame* f)
 
 u32* frame_add_layer(Frame* f, int width, int height)
 {
-    u32*      pixels = ALLOC_ARRAY(u32, width * height);
+    u32*      pixels = KORE_ARRAY_ALLOC(u32, width * height);
     GfxLayer* layer  = gfx_layer_create(width, height, pixels);
     if (!layer) {
         fprintf(stderr, "Failed to create graphics layer\n");
         free(pixels);
         return NULL;
     }
-    array_push(f->layers, layer);
+    array_add(f->layers, layer);
     return pixels;
 }
 

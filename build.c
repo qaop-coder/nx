@@ -9,33 +9,44 @@ int main(int argc, char** argv)
         run = true;
     }
 
-    const char** libraries;
+    KArray(const char*) libraries = 0;
 
     switch (build_platform()) {
     case Platform_Windows:
-        libraries = (const char*[]){"user32", "gdi32", "opengl32", 0};
+        array_add(libraries, "user32");
+        array_add(libraries, "gdi32");
+        array_add(libraries, "opengl32");
         break;
     case Platform_Linux:
-        libraries = (const char*[]){"X11", 0};
+        array_add(libraries, "X11");
         break;
     case Platform_MacOS:
-        libraries = (const char*[]){"Cocoa", 0};
+        array_add(libraries, "Cocoa");
         break;
     default:
-        fprintf(stderr, "Unsupported platform.\n");
+        $.eprn("Unsupported platform.");
         return EXIT_FAILURE;
     }
-    if (compile_project("nx", "src", libraries, "_bin")) {
-        fprintf(stderr, "Compilation failed. Please check the output above.\n");
+
+    Arena global_arena = arena_init();
+
+    CompileInfo info   = compile_info_init(&global_arena, "nx");
+    compile_info_output_folder(&info, "_bin");
+    compile_info_debug(&info);
+    compile_info_add_folder(&info, "src", true);
+    compile_info_add_include_path(&info, "3rd/kore");
+    compile_info_add_libraries(&info, libraries);
+
+    if (compile(&info) != 0) {
+        $.eprn("Compilation failed. Please check the output above.");
         return EXIT_FAILURE;
     }
 
     if (run) {
         String exe_file = string_view("_bin/nx");
         if (build_run(exe_file) != 0) {
-            fprintf(stderr,
-                    "Failed to run the executable. Please check the output "
-                    "above.\n");
+            $.eprn(
+                "Failed to run the executable. Please check the output above.");
             return EXIT_FAILURE;
         }
     }

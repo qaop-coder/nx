@@ -3,11 +3,10 @@
 //------------------------------------------------------------------------------
 
 #include "memory.h"
-#include "data.h"
 
 void mem_init(Memory* memory)
 {
-    memory->ram = ALLOC_ARRAY(u8, 65536); // Allocate 64KB of RAM
+    memory->ram = KORE_ARRAY_ALLOC(u8, 65536); // Allocate 64KB of RAM
 
     for (u32 i = 0; i < 65536; i++) {
         memory->ram[i] = 0xff;
@@ -16,7 +15,7 @@ void mem_init(Memory* memory)
 
 void mem_done(Memory* memory)
 {
-    FREE_ARRAY(memory->ram);
+    KORE_ARRAY_FREE(memory->ram);
     memory->ram = NULL; // Set pointer to NULL after freeing
 }
 
@@ -52,12 +51,12 @@ void mem_load(Memory* memory, u16 addr, const u8* data, u16 size)
 
 void mem_load_file(Memory* memory, u16 addr, const char* filename)
 {
-    Data data = data_load(filename);
-    if (data_loaded(&data)) {
+    KData data = $.data_load(filename);
+    if ($.is_data_loaded(&data)) {
         mem_load(memory, addr, data.data, (u16)data.size);
-        data_unload(&data);
+        $.data_unload(&data);
     } else {
-        fprintf(stderr, "Failed to load file: %s\n", filename);
+        $.eprn("Failed to load file: %s", filename);
         exit(EXIT_FAILURE);
     }
 }

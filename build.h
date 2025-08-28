@@ -1,6 +1,9 @@
 
 #pragma once
 
+#define KORE_IMPLEMENTATION
+#include "3rd/kore/kore.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -22,102 +25,12 @@
 // Basic types
 //
 
-typedef int8_t   i8;
-typedef int16_t  i16;
-typedef int32_t  i32;
-typedef int64_t  i64;
-typedef uint8_t  u8;
-typedef uint16_t u16;
-typedef uint32_t u32;
-typedef uint64_t u64;
-
-typedef float  f32;
-typedef double f64;
-
-typedef intptr_t  isize;
-typedef uintptr_t usize;
-
 typedef struct {
     const char* data;
     size_t      length;
 } String;
 
 #define STRINGV(s) (int)(s).length, (s).data
-
-//
-// ANSI Colour sequences
-//
-
-#define ANSI_RESET "\033[0m"
-#define ANSI_BOLD "\033[1m"
-#define ANSI_UNDERLINE "\033[4m"
-#define ANSI_RED "\033[31m"
-#define ANSI_GREEN "\033[32m"
-#define ANSI_YELLOW "\033[33m"
-#define ANSI_BLUE "\033[34m"
-#define ANSI_MAGENTA "\033[35m"
-#define ANSI_CYAN "\033[36m"
-#define ANSI_WHITE "\033[37m"
-
-//
-// Dynamic memory allocation
-//
-
-typedef struct {
-    size_t total_size;
-} MemoryInfo;
-
-void* memory_alloc(size_t size)
-{
-    void* ptr = malloc(size + sizeof(MemoryInfo));
-    if (!ptr) {
-        fprintf(stderr, "Memory allocation failed\n");
-        exit(EXIT_FAILURE);
-    }
-
-    MemoryInfo* info = (MemoryInfo*)ptr;
-    info->total_size = size;
-    return info + 1;
-}
-
-void* memory_realloc(void* ptr, size_t new_size)
-{
-    if (!ptr) {
-        return memory_alloc(new_size);
-    }
-
-    MemoryInfo* info    = (MemoryInfo*)ptr - 1;
-    void*       new_ptr = realloc(info, new_size + sizeof(MemoryInfo));
-    if (!new_ptr) {
-        fprintf(stderr, "Memory reallocation failed\n");
-        exit(EXIT_FAILURE);
-    }
-
-    info             = (MemoryInfo*)new_ptr;
-    info->total_size = new_size;
-    return info + 1;
-}
-
-void* memory_free(void* ptr)
-{
-    if (!ptr) {
-        return nullptr;
-    }
-
-    MemoryInfo* info = (MemoryInfo*)ptr - 1;
-    free(info);
-    return nullptr;
-}
-
-size_t memory_size(void* ptr)
-{
-    if (!ptr) {
-        return 0;
-    }
-
-    MemoryInfo* info = (MemoryInfo*)ptr - 1;
-    return info->total_size;
-}
 
 //
 // Arena memory allocation
@@ -132,7 +45,7 @@ typedef struct {
 
 Arena arena_init()
 {
-    void* buffer = malloc(ARENA_PAGE_SIZE);
+    void* buffer = KORE_ALLOC(ARENA_PAGE_SIZE);
     Arena arena  = {.buffer = buffer, .cursor = 0};
     return arena;
 }
@@ -140,7 +53,7 @@ Arena arena_init()
 void arena_free(Arena* arena)
 {
     if (arena->buffer) {
-        free(arena->buffer);
+        KORE_FREE(arena->buffer);
         arena->buffer = nullptr;
     }
     arena->cursor = 0;
@@ -159,9 +72,9 @@ void arena_restore(Arena* arena, u64 cursor)
 
 void* arena_alloc(Arena* arena, size_t size)
 {
-    while (memory_size(arena->buffer) < arena->cursor + size) {
-        size_t new_size = memory_size(arena->buffer) + ARENA_PAGE_SIZE;
-        arena->buffer   = memory_realloc(arena->buffer, new_size);
+    while ($.memory_size(arena->buffer) < arena->cursor + size) {
+        size_t new_size = $.memory_size(arena->buffer) + ARENA_PAGE_SIZE;
+        arena->buffer   = KORE_REALLOC(arena->buffer, new_size);
     }
 
     void* ptr = (char*)arena->buffer + arena->cursor;
@@ -176,53 +89,6 @@ void* arena_mark(Arena* arena)
 }
 
 void arena_reset(Arena* arena) { arena->cursor = 0; }
-
-//
-// Dynamic array implementation
-//
-
-typedef struct {
-    usize length;
-} ArrayInfo;
-
-#define __array_info(arr) ((ArrayInfo*)(arr) - 1)
-#define __array_capacity(arr) (memory_size(__array_info(arr)) / sizeof(*(arr)))
-#define __array_length(arr) __array_info(arr)->length
-
-void* __array_maybe_grow(void*  arr,
-                         size_t element_size,
-                         size_t additional_elements)
-{
-    if (!arr) {
-        ArrayInfo* new_arr = memory_alloc(sizeof(ArrayInfo) +
-                                          element_size * additional_elements);
-        new_arr->length    = 0;
-        return new_arr + 1;
-    }
-
-    ArrayInfo* info              = __array_info(arr);
-    size_t     current_capacity  = memory_size(info) / element_size;
-    size_t     required_capacity = info->length + additional_elements;
-
-    if (required_capacity <= current_capacity) {
-        return arr;
-    }
-
-    size_t new_capacity =
-        current_capacity ? current_capacity * 2 : required_capacity;
-    ArrayInfo* new_arr =
-        memory_realloc(info, sizeof(ArrayInfo) + element_size * new_capacity);
-
-    return new_arr + 1;
-}
-
-#define Array(type) type*
-
-#define array_length(arr) ((arr) ? __array_length(arr) : 0)
-#define array_push(arr, value)                                                 \
-    arr = (typeof(arr))__array_maybe_grow(arr, sizeof(*(arr)), 1),             \
-    (arr)[__array_length(arr)] = (value), __array_length(arr) += 1
-#define array_free(arr) (arr) = memory_free(__array_info(arr))
 
 //
 // String routines
@@ -362,7 +228,7 @@ void file_rename(const char* old_path, const char* new_path)
 }
 
 static void files_list_recursive(Arena* arena,
-                                 Array(String) * files,
+                                 KArray(String) * files,
                                  const char* directory,
                                  bool        recursive)
 {
@@ -395,7 +261,7 @@ static void files_list_recursive(Arena* arena,
                     }
                 } else {
                     // Only add files, not directories
-                    array_push(*files, file_sb.str);
+                    array_add(*files, file_sb.str);
                 }
             }
         } while (FindNextFileA(find_handle, &find_data));
@@ -440,9 +306,9 @@ static void files_list_recursive(Arena* arena,
 #endif // _WIN32
 }
 
-Array(String) files_list(Arena* arena, const char* directory, bool recursive)
+KArray(String) files_list(Arena* arena, const char* directory, bool recursive)
 {
-    Array(String) files = nullptr;
+    KArray(String) files = nullptr;
     files_list_recursive(arena, &files, directory, recursive);
     return files;
 }
@@ -455,7 +321,7 @@ i32 build_run(String command)
 {
     printf("Running command: %.*s\n", STRINGV(command));
 
-    char* command_buffer = (char*)memory_alloc(command.length + 1);
+    char* command_buffer = KORE_ARRAY_ALLOC(char, command.length + 1);
     memcpy(command_buffer, command.data, command.length);
     command_buffer[command.length] = '\0';
 
@@ -499,8 +365,9 @@ i32 build_run(String command)
 
 typedef struct {
     Arena* arena;
-    Array(String) files;
-    Array(String) libraries;
+    KArray(String) files;
+    KArray(String) libraries;
+    KArray(String) include_paths;
     bool   debug;
     String output_file;
     String output_folder;
@@ -509,14 +376,15 @@ typedef struct {
 CompileInfo compile_info_init(Arena* arena, const char* output_file)
 {
     CompileInfo info;
-    info.arena       = arena;
-    info.files       = nullptr;
-    info.libraries   = nullptr;
-    info.debug       = false;
+    info.arena         = arena;
+    info.files         = nullptr;
+    info.libraries     = nullptr;
+    info.include_paths = nullptr;
+    info.debug         = false;
 
-    StringBuilder sb = string_builder_init(arena);
+    StringBuilder sb   = string_builder_init(arena);
     string_builder_append_zstring(&sb, output_file);
-#ifdef _WIN32
+#if KORE_OS_WINDOWS
     string_builder_append_zstring(&sb, ".exe");
 #endif
     info.output_file = sb.str;
@@ -530,25 +398,40 @@ void compile_info_add_file(CompileInfo* info, const char* file)
 {
     StringBuilder sb = string_builder_init(info->arena);
     string_builder_append_zstring(&sb, file);
-    array_push(info->files, sb.str);
+    array_add(info->files, sb.str);
 }
 
 void compile_info_add_library(CompileInfo* info, const char* library)
 {
     StringBuilder sb = string_builder_init(info->arena);
     string_builder_append_zstring(&sb, library);
-    array_push(info->libraries, sb.str);
+    array_add(info->libraries, sb.str);
+}
+
+void compile_info_add_libraries(CompileInfo* info, KArray(const char*) libs)
+{
+    usize num_libs = array_length(libs);
+    for (usize i = 0; i < num_libs; ++i) {
+        compile_info_add_library(info, libs[i]);
+    }
+}
+
+void compile_info_add_include_path(CompileInfo* info, const char* path)
+{
+    StringBuilder sb = string_builder_init(info->arena);
+    string_builder_append_zstring(&sb, path);
+    array_add(info->include_paths, sb.str);
 }
 
 void compile_info_add_folder(CompileInfo* info,
                              const char*  folder,
                              bool         recursive)
 {
-    Array(String) files = files_list(info->arena, folder, recursive);
+    KArray(String) files = files_list(info->arena, folder, recursive);
     for (usize i = 0; i < array_length(files); ++i) {
         if (string_ends_with_zstring(files[i], ".c")) {
             // Only add C/C++ source files
-            array_push(info->files, files[i]);
+            array_add(info->files, files[i]);
         }
     }
     array_free(files);
@@ -593,6 +476,11 @@ i32 compile(CompileInfo* info)
         string_builder_append_zstring(&sb, " -g -DDEBUG");
     }
 
+    for (usize i = 0; i < array_length(info->include_paths); ++i) {
+        string_builder_append_zstring(&sb, " -I");
+        string_builder_append_string(&sb, info->include_paths[i]);
+    }
+
     for (usize i = 0; i < array_length(info->libraries); ++i) {
         string_builder_append_zstring(&sb, " -l");
         string_builder_append_string(&sb, info->libraries[i]);
@@ -607,31 +495,14 @@ i32 compile(CompileInfo* info)
     return build_run(sb.str);
 }
 
-i32 compile_project(const char*  exe_name,
-                    const char*  source_folder,
-                    const char** libraries,
-                    const char*  output_folder)
-{
-    Arena       temp_arena = arena_init();
-    CompileInfo info       = compile_info_init(&temp_arena, exe_name);
-    compile_info_add_folder(&info, source_folder, true);
-    compile_info_output_folder(&info, output_folder);
-    compile_info_debug(&info);
-    if (libraries) {
-        while (*libraries) {
-            compile_info_add_library(&info, *libraries);
-            libraries++;
-        }
-    }
-    return compile(&info);
-}
-
 //
 // Build checker
 //
 
 void build_check(int argc, char** argv)
 {
+    $.init();
+
     const char* exe_file      = argv[0];
     Arena       temp_arena    = arena_init();
 
@@ -670,9 +541,9 @@ void build_check(int argc, char** argv)
 
     if (file_time_compare(time_build_h, time_build_exe) > 0 ||
         file_time_compare(time_build_c, time_build_exe) > 0) {
-        printf(ANSI_GREEN
-               "Rebuilding '%s' due to changes in build files.\n" ANSI_RESET,
-               exe_file);
+        $.prn(KORE_ANSI_GREEN
+              "Rebuilding '%s' due to changes in build files." KORE_ANSI_RESET,
+              exe_file);
 
         // Create the new executable file name: <old-exe-file>.new
         StringBuilder sb_name = string_builder_init(&temp_arena);

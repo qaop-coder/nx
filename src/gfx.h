@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include "core.h"
+#include "kore.h"
 
 // Minimal immediate-mode style interface for layered RGBA buffers rendered via
 // OpenGL. Call gfx_init after creating an OpenGL context. Create one or more

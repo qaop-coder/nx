@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include "core.h"
+#include "kore.h"
 
 typedef struct {
     u8* ram;

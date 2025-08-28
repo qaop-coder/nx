@@ -8,7 +8,7 @@
 // - No attempt is made to restore previous GL state (kept minimal). If your
 //   engine relies on specific state, set it again after calling gfx_render.
 
-#if defined(__APPLE__)
+#if KORE_OS_MACOS
 #    include <OpenGL/gl.h>
 #else
 #    include <GL/gl.h>
@@ -36,7 +36,7 @@ static GLuint g_vao      = 0;
 static GLuint g_vbo      = 0;
 static bool   g_inited   = false;
 
-#if defined(OS_WINDOWS)
+#if KORE_OS_WINDOWS
 // WGL context we may create (only if none exists on init)
 static HWND    g_hwnd         = NULL;
 static HDC     g_hdc          = NULL;
@@ -324,7 +324,7 @@ static void gfx_destroy_dummy_context(void)
         g_gl_lib = NULL;
     }
 }
-#endif // OS_WINDOWS
+#endif // KORE_OS_WINDOWS
 
 // ---------- Minimal Shader Setup ----------
 
@@ -336,11 +336,11 @@ static GLuint compile_shader(GLenum type, const char* src)
     GLint ok = 0;
     glGetShaderiv(sh, GL_COMPILE_STATUS, &ok);
     if (!ok) {
-#ifdef _DEBUG
+#ifdef KORE_DEBUG
         char    log[1024];
         GLsizei len = 0;
         glGetShaderInfoLog(sh, (GLsizei)sizeof(log), &len, log);
-#endif
+#endif // KORE_DEBUG
         glDeleteShader(sh);
         return 0;
     }
@@ -395,7 +395,7 @@ bool gfx_init(void)
         return true;
     }
 
-#if defined(OS_WINDOWS)
+#if KORE_OS_WINDOWS
     if (!gfx_create_dummy_context()) {
         // If a context already existed we proceed, else failure.
         if (!wglGetCurrentContext()) {
@@ -406,13 +406,13 @@ bool gfx_init(void)
         gfx_destroy_dummy_context();
         return false;
     }
-#endif
+#endif // KORE_OS_WINDOWS
 
     g_program = create_program();
     if (!g_program) {
-#if defined(OS_WINDOWS)
+#if KORE_OS_WINDOWS
         gfx_destroy_dummy_context();
-#endif
+#endif // KORE_OS_WINDOWS
         return false;
     }
 
@@ -420,14 +420,12 @@ bool gfx_init(void)
     g_attr_uv  = glGetAttribLocation(g_program, "aUV");
     g_unif_tex = glGetUniformLocation(g_program, "uTex");
 
-#if defined(OS_WINDOWS) || defined(__linux__) || defined(__APPLE__)
     if (glGenVertexArrays) {
         glGenVertexArrays(1, &g_vao);
         if (g_vao) {
             glBindVertexArray(g_vao);
         }
     }
-#endif
 
     glGenBuffers(1, &g_vbo);
     glBindBuffer(GL_ARRAY_BUFFER, g_vbo);
@@ -461,7 +459,7 @@ void gfx_shutdown(void)
 {
     if (!g_inited) {
         // Even if not inited, destroy dummy context if we own it (Windows)
-#if defined(OS_WINDOWS)
+#if KORE_OS_WINDOWS
         gfx_destroy_dummy_context();
 #endif
         return;
@@ -485,7 +483,7 @@ void gfx_shutdown(void)
         g_program = 0;
     }
 
-#if defined(OS_WINDOWS)
+#if KORE_OS_WINDOWS
     gfx_destroy_dummy_context();
 #endif
 
@@ -623,7 +621,7 @@ void gfx_render(GfxLayer** layers,
         if (!L || !L->enabled) {
             continue;
         }
-        
+
         // Update texture with current pixel data
         if (L->pixels) {
             gfx_layer_update_pixels(L, L->pixels);

@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include "core.h"
 #include "gfx.h"
 
 //------------------------------------------------------------------------------
@@ -15,18 +14,18 @@ typedef struct {
     const char* title;
     int         width;
     int         height;
-    Array(GfxLayer*) layers;
-    
-    // FPS tracking
-    TimePoint last_time;
-    u64       frame_count;
-    f64       fps;
+    KArray(GfxLayer*) layers;
 
-#if OS_WINDOWS
+    // FPS tracking
+    KTimePoint last_time;
+    u64        frame_count;
+    f64        fps;
+
+#if KORE_OS_WINDOWS
     HWND  hwnd;
     HDC   hdc;
     HGLRC hglrc;
-#elif OS_LINUX
+#elif KORE_OS_LINUX
     Display* display;
     Window   window;
     GC       gc;
@@ -44,3 +43,5 @@ Frame frame_open(int width, int height, const char* title);
 bool  frame_loop(Frame* w);
 u32*  frame_add_layer(Frame* w, int width, int height);
 f64   frame_fps(Frame* w);
+
+void frame_free_pixels(u32* pixels);
