@@ -11,7 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef _WIN32
+#if KORE_OS_WINDOWS
 #    define WIN32_LEAN_AND_MEAN
 #    define NOMINMAX
 #    include <sys/stat.h>
@@ -200,7 +200,7 @@ i32 file_time_compare(u64 time1, u64 time2)
 
 void file_delete(const char* path)
 {
-#ifdef _WIN32
+#if KORE_OS_WINDOWS
     if (DeleteFileA(path) == 0) {
         fprintf(stderr, "Failed to delete file: %s\n", path);
     }
@@ -214,7 +214,7 @@ void file_delete(const char* path)
 void file_rename(const char* old_path, const char* new_path)
 {
     // Attempt to rename the file
-#ifdef _WIN32
+#if KORE_OS_WINDOWS
     if (MoveFileA(old_path, new_path) == 0) {
         fprintf(stderr,
                 "Failed to rename file from '%s' to '%s'\n",
@@ -236,7 +236,7 @@ static void files_list_recursive(Arena* arena,
                                  const char* directory,
                                  bool        recursive)
 {
-#ifdef _WIN32
+#if KORE_OS_WINDOWS
     WIN32_FIND_DATAA find_data;
     HANDLE           find_handle;
 
@@ -295,7 +295,7 @@ static void files_list_recursive(Arena* arena,
                         }
                     } else if (S_ISREG(st.st_mode)) {
                         // Only add regular files, not directories
-                        array_push(*files, file_sb.str);
+                        array_add(*files, file_sb.str);
                     }
                 }
             }
@@ -329,7 +329,7 @@ i32 build_run(String command)
     memcpy(command_buffer, command.data, command.length);
     command_buffer[command.length] = '\0';
 
-#ifdef _WIN32
+#if KORE_OS_WINDOWS
     STARTUPINFOA        si;
     PROCESS_INFORMATION pi;
     ZeroMemory(&si, sizeof(si));
@@ -360,6 +360,115 @@ i32 build_run(String command)
 #else
     i32 exit_code = system(command.data);
 #endif
+    return exit_code;
+}
+
+i32 build_run_capture(String command, KArray(String)* output_lines, Arena* arena)
+{
+    char* command_buffer = KORE_ARRAY_ALLOC(char, command.length + 1);
+    memcpy(command_buffer, command.data, command.length);
+    command_buffer[command.length] = '\0';
+
+    i32 exit_code = 1;
+
+#if KORE_OS_WINDOWS
+    SECURITY_ATTRIBUTES sa;
+    sa.nLength = sizeof(SECURITY_ATTRIBUTES);
+    sa.bInheritHandle = TRUE;
+    sa.lpSecurityDescriptor = NULL;
+
+    HANDLE stdout_read, stdout_write;
+    if (!CreatePipe(&stdout_read, &stdout_write, &sa, 0)) {
+        fprintf(stderr, "Failed to create pipe for command output\n");
+        goto cleanup;
+    }
+
+    SetHandleInformation(stdout_read, HANDLE_FLAG_INHERIT, 0);
+
+    STARTUPINFOA si;
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
+    si.hStdError = stdout_write;
+    si.hStdOutput = stdout_write;
+    si.dwFlags |= STARTF_USESTDHANDLES;
+    ZeroMemory(&pi, sizeof(pi));
+
+    BOOL success = CreateProcessA(NULL,
+                                 (LPSTR)command_buffer,
+                                 NULL,
+                                 NULL,
+                                 TRUE,
+                                 0,
+                                 NULL,
+                                 NULL,
+                                 &si,
+                                 &pi);
+
+    CloseHandle(stdout_write);
+
+    if (success) {
+        // Read output line by line
+        char buffer[4096];
+        DWORD bytes_read;
+        StringBuilder current_line = string_builder_init(arena);
+        
+        while (ReadFile(stdout_read, buffer, sizeof(buffer) - 1, &bytes_read, NULL) && bytes_read > 0) {
+            buffer[bytes_read] = '\0';
+            
+            for (DWORD i = 0; i < bytes_read; i++) {
+                if (buffer[i] == '\n') {
+                    string_builder_null_terminate(&current_line);
+                    array_add(*output_lines, current_line.str);
+                    current_line = string_builder_init(arena);
+                } else if (buffer[i] != '\r') {
+                    char* ch = string_builder_alloc(&current_line, 1);
+                    *ch = buffer[i];
+                }
+            }
+        }
+        
+        // Add final line if not empty
+        if (current_line.str.length > 0) {
+            string_builder_null_terminate(&current_line);
+            array_add(*output_lines, current_line.str);
+        }
+
+        WaitForSingleObject(pi.hProcess, INFINITE);
+        GetExitCodeProcess(pi.hProcess, (LPDWORD)&exit_code);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+    }
+
+    CloseHandle(stdout_read);
+
+#else
+    FILE* pipe = popen(command_buffer, "r");
+    if (!pipe) {
+        fprintf(stderr, "Failed to run command: %.*s\n", STRINGV(command));
+        goto cleanup;
+    }
+
+    char line_buffer[4096];
+    while (fgets(line_buffer, sizeof(line_buffer), pipe)) {
+        // Remove trailing newline
+        size_t len = strlen(line_buffer);
+        if (len > 0 && line_buffer[len - 1] == '\n') {
+            line_buffer[len - 1] = '\0';
+        }
+        
+        // Copy line to arena and add to array
+        StringBuilder sb = string_builder_init(arena);
+        string_builder_append_zstring(&sb, line_buffer);
+        string_builder_null_terminate(&sb);
+        array_add(*output_lines, sb.str);
+    }
+
+    exit_code = pclose(pipe);
+#endif
+
+cleanup:
+    KORE_ARRAY_FREE(command_buffer);
     return exit_code;
 }
 
@@ -519,7 +628,7 @@ void build_check(int argc, char** argv)
         file_delete(sb_old_name.str.data);
     }
 
-#ifdef _WIN32
+#if KORE_OS_WINDOWS
     // Delete the old .ilk file if it exists
     StringBuilder sb_ilk_name = string_builder_init(&temp_arena);
     string_builder_append_zstring(&sb_ilk_name, exe_file);
@@ -605,7 +714,7 @@ typedef enum {
 
 Platform build_platform()
 {
-#ifdef _WIN32
+#if KORE_OS_WINDOWS
     return Platform_Windows;
 #elif defined(__linux__)
     return Platform_Linux;
@@ -626,7 +735,7 @@ typedef struct {
     bool   recursive;
     bool   running;
     
-#ifdef _WIN32
+#if KORE_OS_WINDOWS
     HANDLE directory_handle;
     HANDLE completion_port;
     OVERLAPPED overlapped;
@@ -638,7 +747,7 @@ typedef struct {
 } WatchInfo;
 
 // Function pointer type for build callbacks
-typedef i32 (*BuildFunction)(CompileInfo* info);
+typedef i32 (*BuildFunction)(void);
 
 // Watch function declaration  
 i32 build_watch(const char* path, BuildFunction build_func);
@@ -834,7 +943,7 @@ static bool watch_add_directory_linux(WatchInfo* watch, const char* dir_path)
         return false;
     }
     
-    array_push(watch->watch_descriptors, wd);
+    array_add(watch->watch_descriptors, wd);
     
     // If recursive, add subdirectories
     if (watch->recursive) {
@@ -1024,8 +1133,8 @@ i32 build_watch(const char* path, BuildFunction build_func)
         if (files_changed && build_func) {
             printf("Files changed, triggering build...\n");
             
-            // Run build function - let the caller handle CompileInfo setup
-            i32 result = build_func(NULL);
+            // Run build function - caller handles all build logic
+            i32 result = build_func();
             if (result == 0) {
                 printf("Build completed successfully.\n");
             } else {

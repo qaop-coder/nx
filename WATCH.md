@@ -68,12 +68,11 @@ series of commits.
 **Goal**: Integrate file watching with existing build system and capture build output
 
 #### Commit 2.1: Integrate with existing build system
-- [ ] Modify `build_watch()` to accept `build_func` callback parameter
-- [ ] Pass `CompileInfo` to callback functions
-- [ ] Ensure proper arena memory management during watch loops
+- [x] Modify `build_watch()` to accept `build_func` callback parameter
+- [x] Ensure proper arena memory management during watch loops
 
 #### Commit 2.2: Capture build output and parse errors
-- [ ] Redirect compiler output to buffers instead of stdout
+- [x] Redirect compiler output to buffers instead of stdout
 - [ ] Parse clang/GCC error and warning messages using regex patterns
 - [ ] Categorize messages by severity (error vs warning)
 - [ ] Store parsed results in structured format

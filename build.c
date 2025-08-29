@@ -1,14 +1,7 @@
 #include "build.h"
 
-int main(int argc, char** argv)
+i32 build()
 {
-    build_check(argc, argv);
-
-    bool run = false;
-    if (argc > 1 && strcmp(argv[1], "run") == 0) {
-        run = true;
-    }
-
     KArray(const char*) libraries = 0;
 
     switch (build_platform()) {
@@ -42,13 +35,37 @@ int main(int argc, char** argv)
         return EXIT_FAILURE;
     }
 
+    return 0;
+}
+
+int main(int argc, char** argv)
+{
+    build_check(argc, argv);
+
+    bool run   = false;
+    bool watch = false;
+    if (argc > 1 && strcmp(argv[1], "run") == 0) {
+        run = true;
+    }
+    if (argc > 1 && strcmp(argv[1], "watch") == 0) {
+        watch = true;
+    }
+
     if (run) {
+        if (build() != 0) {
+            return EXIT_FAILURE;
+        }
+
         String exe_file = string_view("_bin/nx");
         if (build_run(exe_file) != 0) {
             $.eprn(
                 "Failed to run the executable. Please check the output above.");
             return EXIT_FAILURE;
         }
+    } else if (watch) {
+        return build_watch("src", build);
+    } else {
+        return build();
     }
 
     return 0;
