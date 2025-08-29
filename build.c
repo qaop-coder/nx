@@ -1,4 +1,5 @@
 #include "build.h"
+#include "build_watch.h"
 
 i32 build()
 {

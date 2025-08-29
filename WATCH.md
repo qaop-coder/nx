@@ -73,14 +73,14 @@ series of commits.
 
 #### Commit 2.2: Capture build output and parse errors
 - [x] Redirect compiler output to buffers instead of stdout
-- [ ] Parse clang/GCC error and warning messages using regex patterns
-- [ ] Categorize messages by severity (error vs warning)
-- [ ] Store parsed results in structured format
+- [x] Parse clang/GCC error and warning messages using regex patterns
+- [x] Categorize messages by severity (error vs warning)
+- [x] Store parsed results in structured format
 
 #### Commit 2.3: Implement debounced rebuilds
-- [ ] Add file change debouncing (wait 100ms after last change)
-- [ ] Prevent rapid successive rebuilds during bulk file operations
-- [ ] Queue build requests and execute after stabilization period
+- [x] Add file change debouncing (wait 500ms after last change)
+- [x] Prevent rapid successive rebuilds during bulk file operations
+- [x] Queue build requests and execute after stabilization period
 
 ### Milestone 3: Terminal User Interface (TUI)
 **Goal**: Create an interactive TUI for displaying build results with color and emojis
