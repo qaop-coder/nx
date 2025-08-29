@@ -54,15 +54,15 @@ series of commits.
 - [x] Implement proper cleanup and error handling
 
 #### Commit 1.3: Implement Linux file watching  
-- [ ] Add Linux implementation using `inotify` API
-- [ ] Implement recursive directory monitoring with `inotify_add_watch`
-- [ ] Handle `IN_MODIFY`, `IN_CREATE`, `IN_DELETE`, `IN_MOVED_TO` events
-- [ ] Add proper cleanup and error handling
+- [x] Add Linux implementation using `inotify` API
+- [x] Implement recursive directory monitoring with `inotify_add_watch`
+- [x] Handle `IN_MODIFY`, `IN_CREATE`, `IN_DELETE`, `IN_MOVED_TO` events
+- [x] Add proper cleanup and error handling
 
 #### Commit 1.4: Add signal handling for Ctrl+C
-- [ ] Implement cross-platform signal handling (SIGINT)
-- [ ] Graceful shutdown of watch loops
-- [ ] Cleanup resources on exit
+- [x] Implement cross-platform signal handling (SIGINT)
+- [x] Graceful shutdown of watch loops
+- [x] Cleanup resources on exit
 
 ### Milestone 2: Build Integration and Error Handling
 **Goal**: Integrate file watching with existing build system and capture build output

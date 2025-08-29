@@ -22,6 +22,7 @@
 #    include <sys/inotify.h>
 #    include <signal.h>
 #    include <unistd.h>
+#    include <errno.h>
 #endif
 
 //
@@ -799,4 +800,260 @@ static void watch_cleanup_windows(WatchInfo* watch)
     }
 }
 
+#else // KORE_OS_LINUX || KORE_OS_MACOS
+
+static WatchInfo* watch_init_linux(Arena* arena, const char* path)
+{
+    WatchInfo* watch = arena_alloc(arena, sizeof(WatchInfo));
+    watch->arena = arena;
+    watch->watch_path = string_view(path);
+    watch->recursive = true;
+    watch->running = false;
+    watch->watch_descriptors = NULL;
+    
+    // Initialize inotify
+    watch->inotify_fd = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
+    if (watch->inotify_fd == -1) {
+        fprintf(stderr, "Failed to initialize inotify: %s\n", strerror(errno));
+        return NULL;
+    }
+    
+    return watch;
+}
+
+static bool watch_add_directory_linux(WatchInfo* watch, const char* dir_path)
+{
+    int wd = inotify_add_watch(
+        watch->inotify_fd,
+        dir_path,
+        IN_MODIFY | IN_CREATE | IN_DELETE | IN_MOVED_TO | IN_MOVED_FROM
+    );
+    
+    if (wd == -1) {
+        fprintf(stderr, "Failed to add watch for %s: %s\n", dir_path, strerror(errno));
+        return false;
+    }
+    
+    array_push(watch->watch_descriptors, wd);
+    
+    // If recursive, add subdirectories
+    if (watch->recursive) {
+        KArray(String) subdirs = files_list(watch->arena, dir_path, false);
+        for (usize i = 0; i < array_length(subdirs); ++i) {
+            struct stat st;
+            if (stat(subdirs[i].data, &st) == 0 && S_ISDIR(st.st_mode)) {
+                watch_add_directory_linux(watch, subdirs[i].data);
+            }
+        }
+        array_free(subdirs);
+    }
+    
+    return true;
+}
+
+static bool watch_process_changes_linux(WatchInfo* watch, bool* files_changed)
+{
+    char buffer[4096];
+    ssize_t length = read(watch->inotify_fd, buffer, sizeof(buffer));
+    
+    if (length == -1) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            return true; // No events, continue watching
+        }
+        fprintf(stderr, "Failed to read inotify events: %s\n", strerror(errno));
+        return false;
+    }
+    
+    if (length == 0) {
+        return true; // No events, continue watching
+    }
+    
+    // Process events
+    char* ptr = buffer;
+    while (ptr < buffer + length) {
+        struct inotify_event* event = (struct inotify_event*)ptr;
+        
+        if (event->len > 0) {
+            const char* filename = event->name;
+            
+            // Check if this is a relevant file
+            if (is_relevant_file_extension(filename)) {
+                *files_changed = true;
+                printf("File changed: %s\n", filename);
+            }
+            
+            // If a new directory was created, add it to watch list
+            if ((event->mask & IN_CREATE) && (event->mask & IN_ISDIR)) {
+                StringBuilder full_path = string_builder_init(watch->arena);
+                string_builder_append_string(&full_path, watch->watch_path);
+                string_builder_append_zstring(&full_path, "/");
+                string_builder_append_zstring(&full_path, filename);
+                string_builder_null_terminate(&full_path);
+                
+                watch_add_directory_linux(watch, full_path.str.data);
+            }
+        }
+        
+        ptr += sizeof(struct inotify_event) + event->len;
+    }
+    
+    return true;
+}
+
+static void watch_cleanup_linux(WatchInfo* watch)
+{
+    if (watch->inotify_fd != -1) {
+        // Remove all watches
+        for (usize i = 0; i < array_length(watch->watch_descriptors); ++i) {
+            inotify_rm_watch(watch->inotify_fd, watch->watch_descriptors[i]);
+        }
+        
+        close(watch->inotify_fd);
+        watch->inotify_fd = -1;
+    }
+    
+    if (watch->watch_descriptors) {
+        array_free(watch->watch_descriptors);
+        watch->watch_descriptors = NULL;
+    }
+}
+
 #endif
+
+//
+// Cross-platform signal handling
+//
+
+#if KORE_OS_WINDOWS
+static BOOL WINAPI console_ctrl_handler(DWORD ctrl_type)
+{
+    switch (ctrl_type) {
+    case CTRL_C_EVENT:
+    case CTRL_BREAK_EVENT:
+    case CTRL_CLOSE_EVENT:
+        watch_should_stop = true;
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+static void setup_signal_handlers()
+{
+    SetConsoleCtrlHandler(console_ctrl_handler, TRUE);
+}
+
+static void cleanup_signal_handlers()
+{
+    SetConsoleCtrlHandler(console_ctrl_handler, FALSE);
+}
+#else
+static void sigint_handler(int sig)
+{
+    (void)sig;
+    watch_should_stop = true;
+}
+
+static void setup_signal_handlers()
+{
+    struct sigaction sa;
+    sa.sa_handler = sigint_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGINT, &sa, NULL);
+}
+
+static void cleanup_signal_handlers()
+{
+    // Restore default SIGINT handler
+    signal(SIGINT, SIG_DFL);
+}
+#endif
+
+//
+// Main watch function implementation
+//
+
+i32 build_watch(const char* path, BuildFunction build_func)
+{
+    $.init();
+    
+    Arena watch_arena = arena_init();
+    WatchInfo* watch = NULL;
+    
+    // Setup signal handling for graceful shutdown
+    setup_signal_handlers();
+    
+    // Initialize platform-specific watching
+#if KORE_OS_WINDOWS
+    watch = watch_init_windows(&watch_arena, path);
+    if (!watch || !watch_start_monitoring_windows(watch)) {
+        fprintf(stderr, "Failed to start file watching on Windows\n");
+        goto cleanup;
+    }
+#else
+    watch = watch_init_linux(&watch_arena, path);
+    if (!watch || !watch_add_directory_linux(watch, path)) {
+        fprintf(stderr, "Failed to start file watching on Linux\n");
+        goto cleanup;
+    }
+#endif
+    
+    watch->running = true;
+    printf("Watching directory: %s\n", path);
+    printf("Press Ctrl+C to stop watching.\n");
+    
+    // Main watch loop
+    while (watch->running && !watch_should_stop) {
+        bool files_changed = false;
+        
+        // Process file changes
+#if KORE_OS_WINDOWS
+        if (!watch_process_changes_windows(watch, &files_changed)) {
+            fprintf(stderr, "Error processing file changes on Windows\n");
+            break;
+        }
+#else
+        if (!watch_process_changes_linux(watch, &files_changed)) {
+            fprintf(stderr, "Error processing file changes on Linux\n");
+            break;
+        }
+#endif
+        
+        // If files changed, trigger build
+        if (files_changed && build_func) {
+            printf("Files changed, triggering build...\n");
+            
+            // Run build function - let the caller handle CompileInfo setup
+            i32 result = build_func(NULL);
+            if (result == 0) {
+                printf("Build completed successfully.\n");
+            } else {
+                printf("Build failed with code %d.\n", result);
+            }
+        }
+        
+        // Small sleep to prevent excessive CPU usage
+#if KORE_OS_WINDOWS
+        Sleep(10);
+#else
+        usleep(10000); // 10ms
+#endif
+    }
+    
+cleanup:
+    // Cleanup resources
+    if (watch) {
+#if KORE_OS_WINDOWS
+        watch_cleanup_windows(watch);
+#else
+        watch_cleanup_linux(watch);
+#endif
+    }
+    
+    cleanup_signal_handlers();
+    arena_free(&watch_arena);
+    
+    printf("File watching stopped.\n");
+    return 0;
+}
