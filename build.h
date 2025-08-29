@@ -19,6 +19,9 @@
 #else
 #    include <dirent.h>
 #    include <sys/stat.h>
+#    include <sys/inotify.h>
+#    include <signal.h>
+#    include <unistd.h>
 #endif
 
 //
@@ -611,3 +614,30 @@ Platform build_platform()
     return Platform_Unknown;
 #endif
 }
+
+//
+// File watching system
+//
+
+typedef struct {
+    Arena* arena;
+    String watch_path;
+    bool   recursive;
+    bool   running;
+    
+#ifdef _WIN32
+    HANDLE directory_handle;
+    HANDLE completion_port;
+    OVERLAPPED overlapped;
+    BYTE   change_buffer[4096];
+#else
+    int inotify_fd;
+    KArray(int) watch_descriptors;
+#endif
+} WatchInfo;
+
+// Function pointer type for build callbacks
+typedef i32 (*BuildFunction)(CompileInfo* info);
+
+// Watch function declaration
+i32 build_watch(const char* path, BuildFunction build_func);
