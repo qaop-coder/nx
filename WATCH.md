@@ -48,10 +48,10 @@ series of commits.
 - [x] Add platform-specific includes for file watching (Windows: `windows.h`, Linux: `sys/inotify.h`)
 
 #### Commit 1.2: Implement Windows file watching
-- [ ] Add Windows implementation using `ReadDirectoryChangesW`
-- [ ] Handle recursive directory monitoring
-- [ ] Filter for relevant file extensions (.c, .h, .cpp, .hpp)
-- [ ] Implement proper cleanup and error handling
+- [x] Add Windows implementation using `ReadDirectoryChangesW`
+- [x] Handle recursive directory monitoring
+- [x] Filter for relevant file extensions (.c, .h, .cpp, .hpp)
+- [x] Implement proper cleanup and error handling
 
 #### Commit 1.3: Implement Linux file watching  
 - [ ] Add Linux implementation using `inotify` API

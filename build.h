@@ -639,5 +639,164 @@ typedef struct {
 // Function pointer type for build callbacks
 typedef i32 (*BuildFunction)(CompileInfo* info);
 
-// Watch function declaration
+// Watch function declaration  
 i32 build_watch(const char* path, BuildFunction build_func);
+
+//
+// File watching implementation
+//
+
+static volatile bool watch_should_stop = false;
+
+static bool is_relevant_file_extension(const char* filename)
+{
+    const char* ext = strrchr(filename, '.');
+    if (!ext) return false;
+    
+    return strcmp(ext, ".c") == 0 || 
+           strcmp(ext, ".h") == 0 || 
+           strcmp(ext, ".cpp") == 0 || 
+           strcmp(ext, ".hpp") == 0;
+}
+
+#if KORE_OS_WINDOWS
+
+static WatchInfo* watch_init_windows(Arena* arena, const char* path)
+{
+    WatchInfo* watch = arena_alloc(arena, sizeof(WatchInfo));
+    watch->arena = arena;
+    watch->watch_path = string_view(path);
+    watch->recursive = true;
+    watch->running = false;
+    
+    // Convert path to wide string for Windows API
+    int path_len = MultiByteToWideChar(CP_UTF8, 0, path, -1, NULL, 0);
+    WCHAR* wide_path = arena_alloc(arena, path_len * sizeof(WCHAR));
+    MultiByteToWideChar(CP_UTF8, 0, path, -1, wide_path, path_len);
+    
+    // Open directory for watching
+    watch->directory_handle = CreateFileW(
+        wide_path,
+        FILE_LIST_DIRECTORY,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        NULL,
+        OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
+        NULL
+    );
+    
+    if (watch->directory_handle == INVALID_HANDLE_VALUE) {
+        fprintf(stderr, "Failed to open directory for watching: %s\n", path);
+        return NULL;
+    }
+    
+    // Create completion port for async I/O
+    watch->completion_port = CreateIoCompletionPort(
+        watch->directory_handle,
+        NULL,
+        (ULONG_PTR)watch,
+        0
+    );
+    
+    if (!watch->completion_port) {
+        fprintf(stderr, "Failed to create completion port\n");
+        CloseHandle(watch->directory_handle);
+        return NULL;
+    }
+    
+    ZeroMemory(&watch->overlapped, sizeof(OVERLAPPED));
+    
+    return watch;
+}
+
+static bool watch_start_monitoring_windows(WatchInfo* watch)
+{
+    DWORD bytes_returned;
+    BOOL success = ReadDirectoryChangesW(
+        watch->directory_handle,
+        watch->change_buffer,
+        sizeof(watch->change_buffer),
+        watch->recursive ? TRUE : FALSE,
+        FILE_NOTIFY_CHANGE_FILE_NAME | 
+        FILE_NOTIFY_CHANGE_DIR_NAME | 
+        FILE_NOTIFY_CHANGE_SIZE |
+        FILE_NOTIFY_CHANGE_LAST_WRITE,
+        &bytes_returned,
+        &watch->overlapped,
+        NULL
+    );
+    
+    return success != 0;
+}
+
+static bool watch_process_changes_windows(WatchInfo* watch, bool* files_changed)
+{
+    DWORD bytes_transferred;
+    ULONG_PTR completion_key;
+    LPOVERLAPPED overlapped;
+    
+    // Check for changes with timeout
+    BOOL result = GetQueuedCompletionStatus(
+        watch->completion_port,
+        &bytes_transferred,
+        &completion_key,
+        &overlapped,
+        100  // 100ms timeout
+    );
+    
+    if (!result) {
+        DWORD error = GetLastError();
+        if (error == WAIT_TIMEOUT) {
+            return true; // Continue watching
+        }
+        fprintf(stderr, "GetQueuedCompletionStatus failed: %lu\n", error);
+        return false;
+    }
+    
+    if (bytes_transferred == 0) {
+        return true; // Continue watching
+    }
+    
+    // Process file changes
+    FILE_NOTIFY_INFORMATION* info = (FILE_NOTIFY_INFORMATION*)watch->change_buffer;
+    
+    while (info) {
+        // Convert filename from wide string
+        int filename_len = WideCharToMultiByte(CP_UTF8, 0, info->FileName, 
+                                             info->FileNameLength / sizeof(WCHAR), 
+                                             NULL, 0, NULL, NULL);
+        char* filename = arena_alloc(watch->arena, filename_len + 1);
+        WideCharToMultiByte(CP_UTF8, 0, info->FileName, 
+                          info->FileNameLength / sizeof(WCHAR), 
+                          filename, filename_len, NULL, NULL);
+        filename[filename_len] = '\0';
+        
+        // Check if this is a relevant file
+        if (is_relevant_file_extension(filename)) {
+            *files_changed = true;
+            printf("File changed: %s\n", filename);
+        }
+        
+        // Move to next notification
+        if (info->NextEntryOffset == 0) break;
+        info = (FILE_NOTIFY_INFORMATION*)((char*)info + info->NextEntryOffset);
+    }
+    
+    // Restart monitoring
+    return watch_start_monitoring_windows(watch);
+}
+
+static void watch_cleanup_windows(WatchInfo* watch)
+{
+    if (watch->completion_port) {
+        CloseHandle(watch->completion_port);
+        watch->completion_port = NULL;
+    }
+    
+    if (watch->directory_handle && watch->directory_handle != INVALID_HANDLE_VALUE) {
+        CloseHandle(watch->directory_handle);
+        watch->directory_handle = INVALID_HANDLE_VALUE;
+    }
+}
+
+#endif
