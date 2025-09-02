@@ -83,20 +83,20 @@ series of commits.
 - [x] Queue build requests and execute after stabilization period
 
 ### Milestone 3: Terminal User Interface (TUI)
-**Goal**: Create an interactive TUI for displaying build results with color and emojis
+**Goal**: Create an interactive TUI for displaying build results with colour and emojis
 
 #### Commit 3.1: Basic TUI framework
-- [ ] Initialize cross-platform terminal handling
-- [ ] Implement screen clearing and cursor positioning
-- [ ] Add keyboard input handling for 'q' and Ctrl+C
-- [ ] Set up color support detection and fallbacks
+- [x] Initialise cross-platform terminal handling
+- [x] Implement screen clearing and cursor positioning
+- [x] Add keyboard input handling for 'q' and Ctrl+C
+- [x] Set up colour support detection and fallbacks
 
 #### Commit 3.2: Status display implementation
 - [ ] Create status display functions with emojis:
   - ✅ Success: "Build successful! No errors or warnings."
   - ⚠️  Warnings only: Show warning count and details
   - ❌ Errors: Show error count and details (hide warnings)
-- [ ] Implement color coding (green/yellow/red)
+- [ ] Implement colour coding (green/yellow/red)
 - [ ] Add file path and line number highlighting
 
 #### Commit 3.3: Interactive error navigation

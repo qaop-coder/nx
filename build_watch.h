@@ -3,14 +3,134 @@
 #include "build.h"
 
 #if KORE_OS_WINDOWS
-#else
+#    include <conio.h>
+#elif KORE_OS_LINUX
 #    include <dirent.h>
 #    include <errno.h>
 #    include <signal.h>
 #    include <sys/inotify.h>
 #    include <sys/stat.h>
 #    include <time.h>
+#    include <termios.h>
+#    include <sys/ioctl.h>
 #endif
+
+//
+// Terminal User Interface (TUI) Framework
+//
+
+typedef struct {
+    bool colour_support;
+    bool initialised;
+#if KORE_OS_LINUX
+    struct termios original_termios;
+#endif
+} TUIState;
+
+static TUIState tui_state = {0};
+
+// Terminal control sequences
+#define TUI_CLEAR_SCREEN "\033[2J"
+#define TUI_CURSOR_HOME  "\033[H"
+#define TUI_CURSOR_HIDE  "\033[?25l"
+#define TUI_CURSOR_SHOW  "\033[?25h"
+
+static bool tui_init(void)
+{
+    if (tui_state.initialised) {
+        return true;
+    }
+
+#if KORE_OS_WINDOWS
+    // Enable ANSI escape sequences on Windows 10+
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD dwMode = 0;
+    if (GetConsoleMode(hOut, &dwMode)) {
+        dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+        if (SetConsoleMode(hOut, dwMode)) {
+            tui_state.colour_support = true;
+        }
+    }
+#else
+    // Check if we're in a terminal that supports colours
+    const char* term = getenv("TERM");
+    tui_state.colour_support = term && (strstr(term, "color") || strstr(term, "xterm"));
+    
+    // Set up terminal for raw input
+    if (tcgetattr(STDIN_FILENO, &tui_state.original_termios) == 0) {
+        struct termios new_termios = tui_state.original_termios;
+        new_termios.c_lflag &= ~(ICANON | ECHO);
+        tcsetattr(STDIN_FILENO, TCSANOW, &new_termios);
+    }
+#endif
+
+    tui_state.initialised = true;
+    return true;
+}
+
+static void tui_cleanup(void)
+{
+    if (!tui_state.initialised) {
+        return;
+    }
+
+#if KORE_OS_LINUX
+    // Restore original terminal settings
+    tcsetattr(STDIN_FILENO, TCSANOW, &tui_state.original_termios);
+#endif
+
+    // Show cursor and reset colours
+    printf(TUI_CURSOR_SHOW KORE_ANSI_RESET);
+    fflush(stdout);
+    
+    tui_state.initialised = false;
+}
+
+static void tui_clear_screen(void)
+{
+    printf(TUI_CLEAR_SCREEN TUI_CURSOR_HOME);
+    fflush(stdout);
+}
+
+static void tui_print_coloured(const char* colour, const char* text)
+{
+    if (tui_state.colour_support) {
+        printf("%s%s%s", colour, text, KORE_ANSI_RESET);
+    } else {
+        printf("%s", text);
+    }
+    fflush(stdout);
+}
+
+static bool tui_check_input(void)
+{
+#if KORE_OS_WINDOWS
+    if (_kbhit()) {
+        char ch = _getch();
+        if (ch == 'q' || ch == 'Q' || ch == 27) { // 27 = ESC
+            return true; // Should quit
+        }
+    }
+#else
+    fd_set readfds;
+    struct timeval timeout = {0, 0}; // Non-blocking
+    
+    FD_ZERO(&readfds);
+    FD_SET(STDIN_FILENO, &readfds);
+    
+    if (select(STDIN_FILENO + 1, &readfds, NULL, NULL, &timeout) > 0) {
+        if (FD_ISSET(STDIN_FILENO, &readfds)) {
+            char ch;
+            if (read(STDIN_FILENO, &ch, 1) > 0) {
+                if (ch == 'q' || ch == 'Q' || ch == 27) { // 27 = ESC
+                    return true; // Should quit
+                }
+            }
+        }
+    }
+#endif
+    return false; // Continue
+}
 
 //
 // Build message parsing
@@ -25,10 +145,10 @@ typedef enum {
 
 typedef struct {
     MessageType type;
-    String file_path;
-    int line_number;
-    int column_number;
-    String message;
+    String      file_path;
+    int         line_number;
+    int         column_number;
+    String      message;
 } BuildMessage;
 
 static bool string_contains_zstring(String str, const char* needle)
@@ -199,17 +319,17 @@ static bool is_relevant_file_extension(const char* filename)
 
 static WatchInfo* watch_init_windows(Arena* arena, const char* path)
 {
-    WatchInfo* watch  = arena_alloc(arena, sizeof(WatchInfo));
-    watch->arena      = arena;
-    watch->watch_path = string_view(path);
-    watch->recursive  = true;
-    watch->running    = false;
+    WatchInfo* watch        = arena_alloc(arena, sizeof(WatchInfo));
+    watch->arena            = arena;
+    watch->watch_path       = string_view(path);
+    watch->recursive        = true;
+    watch->running          = false;
     watch->last_change_time = 0;
-    watch->build_pending = false;
+    watch->build_pending    = false;
 
     // Convert path to wide string for Windows API
-    int    path_len   = MultiByteToWideChar(CP_UTF8, 0, path, -1, NULL, 0);
-    WCHAR* wide_path  = arena_alloc(arena, path_len * sizeof(WCHAR));
+    int    path_len  = MultiByteToWideChar(CP_UTF8, 0, path, -1, NULL, 0);
+    WCHAR* wide_path = arena_alloc(arena, path_len * sizeof(WCHAR));
     MultiByteToWideChar(CP_UTF8, 0, path, -1, wide_path, path_len);
 
     // Open directory for watching
@@ -347,12 +467,12 @@ static void watch_cleanup_windows(WatchInfo* watch)
 static WatchInfo* watch_init_linux(Arena* arena, const char* path)
 {
     WatchInfo* watch         = arena_alloc(arena, sizeof(WatchInfo));
-    watch->arena = arena;
-    watch->watch_path = string_view(path);
-    watch->recursive = true;
-    watch->running = false;
-    watch->last_change_time = 0;
-    watch->build_pending = false;
+    watch->arena             = arena;
+    watch->watch_path        = string_view(path);
+    watch->recursive         = true;
+    watch->running           = false;
+    watch->last_change_time  = 0;
+    watch->build_pending     = false;
     watch->watch_descriptors = NULL;
 
     // Initialize inotify
@@ -568,14 +688,15 @@ i32 build_watch(const char* path, BuildFunction build_func)
         // If files changed, update debounce timer
         if (files_changed) {
             watch->last_change_time = $.time_ms($.time_now());
-            watch->build_pending = true;
+            watch->build_pending    = true;
             printf("File changes detected, waiting for stabilization...\n");
         }
 
         // Check if we should trigger build (debounced)
         if (watch->build_pending && build_func) {
             u64 current_time = $.time_ms($.time_now());
-            if (current_time - watch->last_change_time >= 500) { // 500ms debounce
+            if (current_time - watch->last_change_time >=
+                500) { // 500ms debounce
                 watch->build_pending = false;
                 printf("Changes stabilized, triggering build...\n");
 

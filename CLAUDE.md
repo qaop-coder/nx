@@ -75,3 +75,7 @@ The `etc/` directory contains:
 - ROM files for different ZX Spectrum models (48K, 128K, +2, +3)
 - Test programs and screen files
 - Assembly test code and expected outputs
+
+## Writing Guidelines
+
+- Use British spelling

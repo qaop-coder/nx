@@ -12,7 +12,6 @@
 int main(int argc, char** argv)
 {
     $.init();
-    $.memory_break_on(5);
 
     Memory memory = {0};
     mem_init(&memory);
@@ -21,11 +20,14 @@ int main(int argc, char** argv)
                                    WINDOW_HEIGHT * WINDOW_SCALE,
                                    "Nx (Dev.9)");
 
-    u32* screen  = frame_add_layer(&main_window, WINDOW_WIDTH, WINDOW_HEIGHT);
-    u32* overlay = frame_add_layer(&main_window, WINDOW_WIDTH, WINDOW_HEIGHT);
+    u32* screen = frame_add_layer(&main_window, WINDOW_WIDTH, WINDOW_HEIGHT);
+    u32* overlay =
+        frame_add_layer(&main_window, WINDOW_WIDTH * 2, WINDOW_HEIGHT * 2);
 
     mem_load_file(&memory, 0x0000, "etc/roms/48.rom");
     mem_load_file(&memory, 0x4000, "etc/screens/AticAtac.scr");
+
+    KORE_ALLOC(100);
 
     while (frame_loop(&main_window)) {
         static unsigned frame = 0;
@@ -43,16 +45,18 @@ int main(int argc, char** argv)
         }
 
         // Overlay layer: test alpha blending with animated circles
-        for (int y = 0; y < WINDOW_HEIGHT; ++y) {
-            u32* row = &overlay[y * WINDOW_WIDTH];
-            for (int x = 0; x < WINDOW_WIDTH; ++x) {
+        int window_width  = WINDOW_WIDTH * 2;
+        int window_height = WINDOW_HEIGHT * 2;
+        for (int y = 0; y < window_height; ++y) {
+            u32* row = &overlay[y * window_width];
+            for (int x = 0; x < window_width; ++x) {
                 // Create animated circles with varying alpha
-                int cx1 = WINDOW_WIDTH / 3 + (int)(30.0 * sin(frame * 0.05));
-                int cy1 = WINDOW_HEIGHT / 3 + (int)(20.0 * cos(frame * 0.03));
+                int cx1 = window_width / 3 + (int)(30.0 * sin(frame * 0.05));
+                int cy1 = window_height / 3 + (int)(20.0 * cos(frame * 0.03));
                 int cx2 =
-                    2 * WINDOW_WIDTH / 3 + (int)(25.0 * cos(frame * 0.04));
+                    2 * window_width / 3 + (int)(25.0 * cos(frame * 0.04));
                 int cy2 =
-                    2 * WINDOW_HEIGHT / 3 + (int)(15.0 * sin(frame * 0.06));
+                    2 * window_height / 3 + (int)(15.0 * sin(frame * 0.06));
 
                 int dx1 = x - cx1, dy1 = y - cy1;
                 int dx2 = x - cx2, dy2 = y - cy2;
