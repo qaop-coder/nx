@@ -1,7 +1,7 @@
 #include "build.h"
 #include "build_watch.h"
 
-i32 build()
+CompileInfo build_create_compile_info(Arena* arena)
 {
     KArray(const char*) libraries = 0;
 
@@ -19,17 +19,24 @@ i32 build()
         break;
     default:
         $.eprn("Unsupported platform.");
-        return EXIT_FAILURE;
+        exit(EXIT_FAILURE);
     }
 
-    Arena global_arena = arena_init();
-
-    CompileInfo info   = compile_info_init(&global_arena, "nx");
+    CompileInfo info = compile_info_init(arena, "nx");
     compile_info_output_folder(&info, "_bin");
     compile_info_debug(&info);
     compile_info_add_folder(&info, "src", true);
     compile_info_add_include_path(&info, "3rd/kore");
     compile_info_add_libraries(&info, libraries);
+    compile_info_add_flags(&info, "-std=c23 -Wall -Wextra");
+
+    return info;
+}
+
+i32 build()
+{
+    Arena       global_arena = arena_init();
+    CompileInfo info         = build_create_compile_info(&global_arena);
 
     if (compile(&info) != 0) {
         $.eprn("Compilation failed. Please check the output above.");
@@ -64,7 +71,7 @@ int main(int argc, char** argv)
             return EXIT_FAILURE;
         }
     } else if (watch) {
-        return build_watch("src", build);
+        return build_watch("src", build_create_compile_info);
     } else {
         return build();
     }

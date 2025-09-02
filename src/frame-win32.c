@@ -39,12 +39,12 @@ static LRESULT CALLBACK WindowProc(HWND   hwnd,
                                    WPARAM wParam,
                                    LPARAM lParam)
 {
-    Frame* f = (Frame*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+    // Frame* f = (Frame*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
     switch (msg) {
     case WM_PAINT:
         {
             PAINTSTRUCT ps;
-            HDC         hdc = BeginPaint(hwnd, &ps);
+            BeginPaint(hwnd, &ps);
             EndPaint(hwnd, &ps);
         }
         break;

@@ -80,26 +80,23 @@ static void tui_cleanup(void)
 #endif
 
     // Show cursor and reset colours
-    printf(TUI_CURSOR_SHOW KORE_ANSI_RESET);
-    fflush(stdout);
+    $.prn(TUI_CURSOR_SHOW KORE_ANSI_RESET);
     
     tui_state.initialised = false;
 }
 
 static void tui_clear_screen(void)
 {
-    printf(TUI_CLEAR_SCREEN TUI_CURSOR_HOME);
-    fflush(stdout);
+    $.pr(TUI_CLEAR_SCREEN TUI_CURSOR_HOME);
 }
 
 static void tui_print_coloured(const char* colour, const char* text)
 {
     if (tui_state.colour_support) {
-        printf("%s%s%s", colour, text, KORE_ANSI_RESET);
+        $.pr("%s%s%s", colour, text, KORE_ANSI_RESET);
     } else {
-        printf("%s", text);
+        $.pr("%s", text);
     }
-    fflush(stdout);
 }
 
 static bool tui_check_input(void)
@@ -270,6 +267,119 @@ static KArray(BuildMessage)
 }
 
 //
+// TUI Status Display Functions
+//
+
+static void tui_display_success(void)
+{
+    tui_print_coloured(KORE_ANSI_GREEN, "✅ Build successful! No errors or warnings.\n");
+}
+
+static void tui_display_warnings(KArray(BuildMessage) messages)
+{
+    int warning_count = 0;
+    
+    // Count warnings
+    for (usize i = 0; i < array_length(messages); ++i) {
+        if (messages[i].type == MessageType_Warning) {
+            warning_count++;
+        }
+    }
+    
+    if (warning_count == 0) {
+        tui_display_success();
+        return;
+    }
+    
+    // Display warning header
+    char header[256];
+    snprintf(header, sizeof(header), "⚠️  Build completed with %d warning%s:\n", 
+             warning_count, warning_count == 1 ? "" : "s");
+    tui_print_coloured(KORE_ANSI_YELLOW, header);
+    
+    // Display warning details
+    for (usize i = 0; i < array_length(messages); ++i) {
+        if (messages[i].type == MessageType_Warning) {
+            $.pr("  ");
+            tui_print_coloured(KORE_ANSI_CYAN, messages[i].file_path.data);
+            if (messages[i].line_number != -1) {
+                $.pr(":%d", messages[i].line_number);
+                if (messages[i].column_number != -1) {
+                    $.pr(":%d", messages[i].column_number);
+                }
+            }
+            $.pr(": ");
+            tui_print_coloured(KORE_ANSI_YELLOW, messages[i].message.data);
+            $.pr("\n");
+        }
+    }
+}
+
+static void tui_display_errors(KArray(BuildMessage) messages)
+{
+    int error_count = 0;
+    
+    // Count errors
+    for (usize i = 0; i < array_length(messages); ++i) {
+        if (messages[i].type == MessageType_Error) {
+            error_count++;
+        }
+    }
+    
+    if (error_count == 0) {
+        // No errors, check for warnings
+        tui_display_warnings(messages);
+        return;
+    }
+    
+    // Display error header
+    char header[256];
+    snprintf(header, sizeof(header), "❌ Build failed with %d error%s:\n", 
+             error_count, error_count == 1 ? "" : "s");
+    tui_print_coloured(KORE_ANSI_RED, header);
+    
+    // Display error details (hide warnings when there are errors)
+    for (usize i = 0; i < array_length(messages); ++i) {
+        if (messages[i].type == MessageType_Error) {
+            $.pr("  ");
+            tui_print_coloured(KORE_ANSI_CYAN, messages[i].file_path.data);
+            if (messages[i].line_number != -1) {
+                $.pr(":%d", messages[i].line_number);
+                if (messages[i].column_number != -1) {
+                    $.pr(":%d", messages[i].column_number);
+                }
+            }
+            $.pr(": ");
+            tui_print_coloured(KORE_ANSI_RED, messages[i].message.data);
+            $.pr("\n");
+        }
+    }
+}
+
+static void tui_display_build_status(KArray(BuildMessage) messages)
+{
+    if (!messages || array_length(messages) == 0) {
+        tui_display_success();
+        return;
+    }
+    
+    // Check if we have any errors
+    bool has_errors = false;
+    for (usize i = 0; i < array_length(messages); ++i) {
+        if (messages[i].type == MessageType_Error) {
+            has_errors = true;
+            break;
+        }
+    }
+    
+    if (has_errors) {
+        tui_display_errors(messages);
+    } else {
+        tui_display_warnings(messages);
+    }
+}
+
+//
 // File watching system
 //
 
@@ -292,11 +402,11 @@ typedef struct {
 #endif
 } WatchInfo;
 
-// Function pointer type for build callbacks
-typedef i32 (*BuildFunction)(void);
+// Function pointer type for CompileInfo setup callback
+typedef CompileInfo (*CompileInfoFunction)(Arena* arena);
 
 // Watch function declaration
-i32 build_watch(const char* path, BuildFunction build_func);
+i32 build_watch(const char* path, CompileInfoFunction setup_func);
 
 //
 // File watching implementation
@@ -639,17 +749,23 @@ static void cleanup_signal_handlers()
 // Main watch function implementation
 //
 
-i32 build_watch(const char* path, BuildFunction build_func)
+i32 build_watch(const char* path, CompileInfoFunction setup_func)
 {
     $.init();
 
     Arena      watch_arena = arena_init();
     WatchInfo* watch       = NULL;
 
+    // Initialise TUI
+    if (!tui_init()) {
+        $.eprn("Failed to initialise TUI");
+        return 1;
+    }
+
     // Setup signal handling for graceful shutdown
     setup_signal_handlers();
 
-    // Initialize platform-specific watching
+    // Initialise platform-specific watching
 #if KORE_OS_WINDOWS
     watch = watch_init_windows(&watch_arena, path);
     if (!watch || !watch_start_monitoring_windows(watch)) {
@@ -665,8 +781,33 @@ i32 build_watch(const char* path, BuildFunction build_func)
 #endif
 
     watch->running = true;
-    printf("Watching directory: %s\n", path);
-    printf("Press Ctrl+C to stop watching.\n");
+    tui_clear_screen();
+    $.prn("🔍 Watching directory: %s", path);
+    $.prn("Press Ctrl+C or 'q' to stop watching.");
+    $.prn("");
+
+    // Setup CompileInfo using callback
+    CompileInfo info = setup_func(&watch_arena);
+
+    // Initial build with capture
+    $.prn("⚙️  Running initial build...");
+    KArray(String) initial_output = NULL;
+    i32 initial_result = compile_watch(&info, &initial_output, &watch_arena);
+    
+    KArray(BuildMessage) initial_messages = parse_build_output(initial_output, &watch_arena);
+    
+    tui_clear_screen();
+    $.prn("🔍 Watching directory: %s", path);
+    $.prn("Press Ctrl+C or 'q' to stop watching.");
+    $.prn("");
+    
+    // Show the command that was executed
+    String cmd_display = compile_info_to_command(&info);
+    $.prn("Command: %s", cmd_display.data);
+    $.prn("");
+    
+    tui_display_build_status(initial_messages);
+    $.prn("");
 
     // Main watch loop
     while (watch->running && !watch_should_stop) {
@@ -689,25 +830,40 @@ i32 build_watch(const char* path, BuildFunction build_func)
         if (files_changed) {
             watch->last_change_time = $.time_ms($.time_now());
             watch->build_pending    = true;
-            printf("File changes detected, waiting for stabilization...\n");
+            $.prn("📝 File changes detected, waiting for stabilisation...");
         }
 
         // Check if we should trigger build (debounced)
-        if (watch->build_pending && build_func) {
+        if (watch->build_pending) {
             u64 current_time = $.time_ms($.time_now());
             if (current_time - watch->last_change_time >=
                 500) { // 500ms debounce
                 watch->build_pending = false;
-                printf("Changes stabilized, triggering build...\n");
+                $.prn("⚙️  Changes stabilised, triggering build...");
 
-                // Run build function - caller handles all build logic
-                i32 result = build_func();
-                if (result == 0) {
-                    printf("Build completed successfully.\n");
-                } else {
-                    printf("Build failed with code %d.\n", result);
-                }
+                // Capture build output using proper compile_watch
+                KArray(String) output_lines = NULL;
+                i32 result = compile_watch(&info, &output_lines, &watch_arena);
+                
+                KArray(BuildMessage) messages = parse_build_output(output_lines, &watch_arena);
+                
+                // Update display with results
+                tui_clear_screen();
+                $.prn("🔍 Watching directory: %s", path);
+                $.prn("Press Ctrl+C or 'q' to stop watching.");
+                $.prn("");
+                $.prn("Command: %s", cmd_display.data);
+                $.prn("");
+                
+                tui_display_build_status(messages);
+                $.prn("");
             }
+        }
+
+        // Check for keyboard input (q to quit)
+        if (tui_check_input()) {
+            watch->running = false;
+            break;
         }
 
         // Small sleep to prevent excessive CPU usage
@@ -719,6 +875,9 @@ i32 build_watch(const char* path, BuildFunction build_func)
     }
 
 cleanup:
+    // Cleanup TUI
+    tui_cleanup();
+    
     // Cleanup resources
     if (watch) {
 #if KORE_OS_WINDOWS
@@ -731,6 +890,6 @@ cleanup:
     cleanup_signal_handlers();
     arena_free(&watch_arena);
 
-    printf("File watching stopped.\n");
+    $.prn("File watching stopped.");
     return 0;
 }

@@ -361,7 +361,7 @@ i32 build_run_capture(String command,
     memcpy(command_buffer, command.data, command.length);
     command_buffer[command.length] = '\0';
 
-    i32 exit_code = 1;
+    i32 exit_code                  = 1;
 
 #if KORE_OS_WINDOWS
     SECURITY_ATTRIBUTES sa;
@@ -471,6 +471,7 @@ typedef struct {
     bool   debug;
     String output_file;
     String output_folder;
+    String flags;
 } CompileInfo;
 
 CompileInfo compile_info_init(Arena* arena, const char* output_file)
@@ -488,6 +489,7 @@ CompileInfo compile_info_init(Arena* arena, const char* output_file)
     string_builder_append_zstring(&sb, ".exe");
 #endif
     info.output_file = sb.str;
+    info.flags       = string_view("");
 
     return info;
 }
@@ -537,6 +539,13 @@ void compile_info_add_folder(CompileInfo* info,
     array_free(files);
 }
 
+void compile_info_add_flags(CompileInfo* info, const char* flags)
+{
+    StringBuilder sb = string_builder_init(info->arena);
+    string_builder_append_zstring(&sb, flags);
+    info->flags = sb.str;
+}
+
 void compile_info_dump(CompileInfo* info)
 {
     printf("CompileInfo:\n");
@@ -557,20 +566,16 @@ void compile_info_output_folder(CompileInfo* info, const char* folder)
     info->output_folder = sb.str;
 }
 
-i32 compile(CompileInfo* info)
+String compile_info_to_command(CompileInfo* info)
 {
-    printf("Compiling project...\n");
     StringBuilder sb = string_builder_init(info->arena);
-    string_builder_append_zstring(&sb, "mkdir -p ");
-    string_builder_append_string(&sb, info->output_folder);
-    string_builder_null_terminate(&sb);
-    build_run(sb.str);
-
-    sb = string_builder_init(info->arena);
-    string_builder_append_zstring(&sb, "clang --std=c23 -o ");
+    string_builder_append_zstring(&sb, "clang -o ");
     string_builder_append_string(&sb, info->output_folder);
     string_builder_append_zstring(&sb, "/");
     string_builder_append_string(&sb, info->output_file);
+
+    string_builder_append_zstring(&sb, " ");
+    string_builder_append_string(&sb, info->flags);
 
     if (info->debug) {
         string_builder_append_zstring(&sb, " -g -DDEBUG");
@@ -592,7 +597,37 @@ i32 compile(CompileInfo* info)
     }
 
     string_builder_null_terminate(&sb);
-    return build_run(sb.str);
+    return sb.str;
+}
+
+i32 compile(CompileInfo* info)
+{
+    printf("Compiling project...\n");
+    StringBuilder sb = string_builder_init(info->arena);
+    string_builder_append_zstring(&sb, "mkdir -p ");
+    string_builder_append_string(&sb, info->output_folder);
+    string_builder_null_terminate(&sb);
+    build_run(sb.str);
+
+    String compile_cmd = compile_info_to_command(info);
+    return build_run(compile_cmd);
+}
+
+// Function declarations for external use
+i32 build_with_capture(KArray(String)* output_lines, Arena* capture_arena);
+
+i32 compile_watch(CompileInfo* info,
+                  KArray(String) * output_lines,
+                  Arena* arena)
+{
+    StringBuilder sb = string_builder_init(info->arena);
+    string_builder_append_zstring(&sb, "mkdir -p ");
+    string_builder_append_string(&sb, info->output_folder);
+    string_builder_null_terminate(&sb);
+    build_run(sb.str);
+
+    String compile_cmd = compile_info_to_command(info);
+    return build_run_capture(compile_cmd, output_lines, arena);
 }
 
 //

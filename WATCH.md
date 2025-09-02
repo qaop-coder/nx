@@ -92,12 +92,12 @@ series of commits.
 - [x] Set up colour support detection and fallbacks
 
 #### Commit 3.2: Status display implementation
-- [ ] Create status display functions with emojis:
+- [x] Create status display functions with emojis:
   - ✅ Success: "Build successful! No errors or warnings."
   - ⚠️  Warnings only: Show warning count and details
   - ❌ Errors: Show error count and details (hide warnings)
-- [ ] Implement colour coding (green/yellow/red)
-- [ ] Add file path and line number highlighting
+- [x] Implement colour coding (green/yellow/red)
+- [x] Add file path and line number highlighting
 
 #### Commit 3.3: Interactive error navigation
 - [ ] Allow arrow key navigation through errors/warnings
@@ -115,8 +115,8 @@ series of commits.
 **Goal**: Add advanced features and improve user experience
 
 #### Commit 4.1: Configuration and filtering
-- [ ] Add configuration file support (.buildwatch.json)
-- [ ] Implement ignore patterns (similar to .gitignore)
+- [ ] Add configuration file support (`.buildwatch.json`)
+- [ ] Implement ignore patterns (similar to `.gitignore`)
 - [ ] Allow custom file extension filters
 - [ ] Add build timeout configuration
 
@@ -151,7 +151,7 @@ series of commits.
 - [ ] Fix platform-specific issues and edge cases
 - [ ] Optimize performance for different file systems
 
-#### Commit 5.3: Final polish and cleanup
+#### Commit 5.3: Final polish and clean-up
 - [ ] Code review and refactoring
 - [ ] Performance profiling and optimization
 - [ ] Documentation updates and examples

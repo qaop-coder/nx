@@ -11,6 +11,9 @@
 
 int main(int argc, char** argv)
 {
+    KORE_UNUSED(argc);
+    KORE_UNUSED(argv);
+
     $.init();
 
     Memory memory = {0};
@@ -26,8 +29,6 @@ int main(int argc, char** argv)
 
     mem_load_file(&memory, 0x0000, "etc/roms/48.rom");
     mem_load_file(&memory, 0x4000, "etc/screens/AticAtac.scr");
-
-    KORE_ALLOC(100);
 
     while (frame_loop(&main_window)) {
         static unsigned frame = 0;
