@@ -22,6 +22,8 @@
 typedef struct {
     bool colour_support;
     bool initialised;
+    int  selected_message_index;
+    int  scroll_offset;
 #if KORE_OS_LINUX
     struct termios original_termios;
 #endif
@@ -99,13 +101,94 @@ static void tui_print_coloured(const char* colour, const char* text)
     }
 }
 
-static bool tui_check_input(void)
+static int tui_get_terminal_height(void)
+{
+#if KORE_OS_WINDOWS
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi)) {
+        return csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
+    }
+    return 25; // Default fallback
+#else
+    struct winsize w;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0) {
+        return w.ws_row;
+    }
+    return 25; // Default fallback
+#endif
+}
+
+static void tui_display_file_context(const char* file_path, int line_number, Arena* arena)
+{
+    if (!file_path || line_number <= 0) {
+        return;
+    }
+    
+    FILE* file = fopen(file_path, "r");
+    if (!file) {
+        return;
+    }
+    
+    const int context_lines = 2; // Show 2 lines before and after
+    const int start_line = line_number - context_lines;
+    const int end_line = line_number + context_lines;
+    
+    char line_buffer[1024];
+    int current_line = 1;
+    
+    // Skip to start line
+    while (current_line < start_line && fgets(line_buffer, sizeof(line_buffer), file)) {
+        current_line++;
+    }
+    
+    // Display context lines
+    while (current_line <= end_line && fgets(line_buffer, sizeof(line_buffer), file)) {
+        // Remove trailing newline
+        size_t len = strlen(line_buffer);
+        if (len > 0 && line_buffer[len - 1] == '\n') {
+            line_buffer[len - 1] = '\0';
+        }
+        
+        $.pr("    ");
+        if (current_line == line_number) {
+            // Highlight the error line with bold
+            tui_print_coloured(KORE_ANSI_BOLD KORE_ANSI_WHITE, "");
+            $.pr("%4d▶ %s", current_line, line_buffer);
+            tui_print_coloured(KORE_ANSI_RESET, "");
+        } else {
+            // Normal context line
+            $.pr("%4d  %s", current_line, line_buffer);
+        }
+        $.pr("\n");
+        current_line++;
+    }
+    
+    fclose(file);
+}
+
+typedef enum {
+    InputResult_Continue,
+    InputResult_Quit,
+    InputResult_NavigateUp,
+    InputResult_NavigateDown
+} InputResult;
+
+static InputResult tui_check_input(void)
 {
 #if KORE_OS_WINDOWS
     if (_kbhit()) {
         char ch = _getch();
         if (ch == 'q' || ch == 'Q' || ch == 27) { // 27 = ESC
-            return true; // Should quit
+            return InputResult_Quit;
+        }
+        // Handle arrow keys (they come as escape sequences)
+        if (ch == 0 || (unsigned char)ch == 224) { // Extended key prefix on Windows
+            ch = _getch();
+            if (ch == 72) { // Up arrow
+                return InputResult_NavigateUp;
+            } else if (ch == 80) { // Down arrow
+                return InputResult_NavigateDown;
+            }
         }
     }
 #else
@@ -120,13 +203,26 @@ static bool tui_check_input(void)
             char ch;
             if (read(STDIN_FILENO, &ch, 1) > 0) {
                 if (ch == 'q' || ch == 'Q' || ch == 27) { // 27 = ESC
-                    return true; // Should quit
+                    if (ch == 27) {
+                        // Check for arrow key escape sequence
+                        char seq[2];
+                        if (read(STDIN_FILENO, &seq[0], 1) > 0 && seq[0] == '[') {
+                            if (read(STDIN_FILENO, &seq[1], 1) > 0) {
+                                if (seq[1] == 'A') { // Up arrow
+                                    return InputResult_NavigateUp;
+                                } else if (seq[1] == 'B') { // Down arrow
+                                    return InputResult_NavigateDown;
+                                }
+                            }
+                        }
+                    }
+                    return InputResult_Quit;
                 }
             }
         }
     }
 #endif
-    return false; // Continue
+    return InputResult_Continue;
 }
 
 //
@@ -275,85 +371,197 @@ static void tui_display_success(void)
     tui_print_coloured(KORE_ANSI_GREEN, "✅ Build successful! No errors or warnings.\n");
 }
 
-static void tui_display_warnings(KArray(BuildMessage) messages)
+static void tui_display_warnings_navigable(KArray(BuildMessage) messages)
 {
     int warning_count = 0;
+    KArray(BuildMessage) warnings = NULL;
     
-    // Count warnings
+    // Extract warnings
     for (usize i = 0; i < array_length(messages); ++i) {
         if (messages[i].type == MessageType_Warning) {
+            array_add(warnings, messages[i]);
             warning_count++;
         }
     }
     
     if (warning_count == 0) {
         tui_display_success();
+        array_free(warnings);
         return;
     }
     
-    // Display warning header
+    // Display warning header with navigation info
     char header[256];
-    snprintf(header, sizeof(header), "⚠️  Build completed with %d warning%s:\n", 
-             warning_count, warning_count == 1 ? "" : "s");
+    if (warning_count > 1) {
+        snprintf(header, sizeof(header), "⚠️  Build completed with %d warnings (Use ↑↓ to navigate):\n", warning_count);
+    } else {
+        snprintf(header, sizeof(header), "⚠️  Build completed with %d warning:\n", warning_count);
+    }
     tui_print_coloured(KORE_ANSI_YELLOW, header);
     
-    // Display warning details
-    for (usize i = 0; i < array_length(messages); ++i) {
-        if (messages[i].type == MessageType_Warning) {
+    // Ensure selected index is valid
+    if (tui_state.selected_message_index >= warning_count) {
+        tui_state.selected_message_index = warning_count - 1;
+    }
+    if (tui_state.selected_message_index < 0) {
+        tui_state.selected_message_index = 0;
+    }
+    
+    // Calculate display bounds for scrolling
+    int terminal_height = tui_get_terminal_height();
+    int max_display_lines = terminal_height - 10; // Reserve space for header/footer
+    int display_count = warning_count > max_display_lines ? max_display_lines : warning_count;
+    
+    // Adjust scroll offset to keep selected item visible
+    if (tui_state.selected_message_index < tui_state.scroll_offset) {
+        tui_state.scroll_offset = tui_state.selected_message_index;
+    } else if (tui_state.selected_message_index >= tui_state.scroll_offset + display_count) {
+        tui_state.scroll_offset = tui_state.selected_message_index - display_count + 1;
+    }
+    
+    // Display warning details with selection highlight
+    for (int i = tui_state.scroll_offset; i < tui_state.scroll_offset + display_count && i < warning_count; ++i) {
+        bool is_selected = (i == tui_state.selected_message_index);
+        
+        if (is_selected) {
+            $.pr("▶ ");
+            tui_print_coloured(KORE_ANSI_BOLD, "");
+        } else {
             $.pr("  ");
-            tui_print_coloured(KORE_ANSI_CYAN, messages[i].file_path.data);
-            if (messages[i].line_number != -1) {
-                $.pr(":%d", messages[i].line_number);
-                if (messages[i].column_number != -1) {
-                    $.pr(":%d", messages[i].column_number);
-                }
+        }
+        
+        tui_print_coloured(KORE_ANSI_CYAN, warnings[i].file_path.data);
+        if (warnings[i].line_number != -1) {
+            $.pr(":%d", warnings[i].line_number);
+            if (warnings[i].column_number != -1) {
+                $.pr(":%d", warnings[i].column_number);
             }
-            $.pr(": ");
-            tui_print_coloured(KORE_ANSI_YELLOW, messages[i].message.data);
+        }
+        $.pr(": ");
+        tui_print_coloured(KORE_ANSI_YELLOW, warnings[i].message.data);
+        
+        if (is_selected) {
+            tui_print_coloured(KORE_ANSI_RESET, "");
+        }
+        $.pr("\n");
+        
+        // Show context for selected message
+        if (is_selected && warnings[i].file_path.data && warnings[i].line_number > 0) {
+            $.pr("\n");
+            
+            // Display file context
+            tui_display_file_context(warnings[i].file_path.data, warnings[i].line_number, NULL);
             $.pr("\n");
         }
     }
+    
+    // Show scrolling indicator if needed
+    if (warning_count > display_count) {
+        $.pr("    ");
+        char scroll_indicator[256];
+        snprintf(scroll_indicator, sizeof(scroll_indicator), "... (%d/%d warnings shown)", display_count, warning_count);
+        tui_print_coloured(KORE_ANSI_WHITE, scroll_indicator);
+        $.pr("\n");
+    }
+    
+    array_free(warnings);
 }
 
-static void tui_display_errors(KArray(BuildMessage) messages)
+static void tui_display_errors_navigable(KArray(BuildMessage) messages)
 {
     int error_count = 0;
+    KArray(BuildMessage) errors = NULL;
     
-    // Count errors
+    // Extract errors
     for (usize i = 0; i < array_length(messages); ++i) {
         if (messages[i].type == MessageType_Error) {
+            array_add(errors, messages[i]);
             error_count++;
         }
     }
     
     if (error_count == 0) {
         // No errors, check for warnings
-        tui_display_warnings(messages);
+        tui_display_warnings_navigable(messages);
+        array_free(errors);
         return;
     }
     
-    // Display error header
+    // Display error header with navigation info
     char header[256];
-    snprintf(header, sizeof(header), "❌ Build failed with %d error%s:\n", 
-             error_count, error_count == 1 ? "" : "s");
+    if (error_count > 1) {
+        snprintf(header, sizeof(header), "❌ Build failed with %d errors (Use ↑↓ to navigate):\n", error_count);
+    } else {
+        snprintf(header, sizeof(header), "❌ Build failed with %d error:\n", error_count);
+    }
     tui_print_coloured(KORE_ANSI_RED, header);
     
-    // Display error details (hide warnings when there are errors)
-    for (usize i = 0; i < array_length(messages); ++i) {
-        if (messages[i].type == MessageType_Error) {
+    // Ensure selected index is valid
+    if (tui_state.selected_message_index >= error_count) {
+        tui_state.selected_message_index = error_count - 1;
+    }
+    if (tui_state.selected_message_index < 0) {
+        tui_state.selected_message_index = 0;
+    }
+    
+    // Calculate display bounds for scrolling
+    int terminal_height = tui_get_terminal_height();
+    int max_display_lines = terminal_height - 10; // Reserve space for header/footer
+    int display_count = error_count > max_display_lines ? max_display_lines : error_count;
+    
+    // Adjust scroll offset to keep selected item visible
+    if (tui_state.selected_message_index < tui_state.scroll_offset) {
+        tui_state.scroll_offset = tui_state.selected_message_index;
+    } else if (tui_state.selected_message_index >= tui_state.scroll_offset + display_count) {
+        tui_state.scroll_offset = tui_state.selected_message_index - display_count + 1;
+    }
+    
+    // Display error details with selection highlight
+    for (int i = tui_state.scroll_offset; i < tui_state.scroll_offset + display_count && i < error_count; ++i) {
+        bool is_selected = (i == tui_state.selected_message_index);
+        
+        if (is_selected) {
+            $.pr("▶ ");
+            tui_print_coloured(KORE_ANSI_BOLD, "");
+        } else {
             $.pr("  ");
-            tui_print_coloured(KORE_ANSI_CYAN, messages[i].file_path.data);
-            if (messages[i].line_number != -1) {
-                $.pr(":%d", messages[i].line_number);
-                if (messages[i].column_number != -1) {
-                    $.pr(":%d", messages[i].column_number);
-                }
+        }
+        
+        tui_print_coloured(KORE_ANSI_CYAN, errors[i].file_path.data);
+        if (errors[i].line_number != -1) {
+            $.pr(":%d", errors[i].line_number);
+            if (errors[i].column_number != -1) {
+                $.pr(":%d", errors[i].column_number);
             }
-            $.pr(": ");
-            tui_print_coloured(KORE_ANSI_RED, messages[i].message.data);
+        }
+        $.pr(": ");
+        tui_print_coloured(KORE_ANSI_RED, errors[i].message.data);
+        
+        if (is_selected) {
+            tui_print_coloured(KORE_ANSI_RESET, "");
+        }
+        $.pr("\n");
+        
+        // Show context for selected message
+        if (is_selected && errors[i].file_path.data && errors[i].line_number > 0) {
+            $.pr("\n");
+            
+            // Display file context
+            tui_display_file_context(errors[i].file_path.data, errors[i].line_number, NULL);
             $.pr("\n");
         }
     }
+    
+    // Show scrolling indicator if needed
+    if (error_count > display_count) {
+        $.pr("    ");
+        char scroll_indicator[256];
+        snprintf(scroll_indicator, sizeof(scroll_indicator), "... (%d/%d errors shown)", display_count, error_count);
+        tui_print_coloured(KORE_ANSI_WHITE, scroll_indicator);
+        $.pr("\n");
+    }
+    
+    array_free(errors);
 }
 
 static void tui_display_build_status(KArray(BuildMessage) messages)
@@ -373,9 +581,9 @@ static void tui_display_build_status(KArray(BuildMessage) messages)
     }
     
     if (has_errors) {
-        tui_display_errors(messages);
+        tui_display_errors_navigable(messages);
     } else {
-        tui_display_warnings(messages);
+        tui_display_warnings_navigable(messages);
     }
 }
 
@@ -809,6 +1017,10 @@ i32 build_watch(const char* path, CompileInfoFunction setup_func)
     tui_display_build_status(initial_messages);
     $.prn("");
 
+    // Store current state for navigation
+    KArray(BuildMessage) current_messages = initial_messages;
+    String current_cmd_display = cmd_display;
+    
     // Main watch loop
     while (watch->running && !watch_should_stop) {
         bool files_changed = false;
@@ -845,25 +1057,61 @@ i32 build_watch(const char* path, CompileInfoFunction setup_func)
                 KArray(String) output_lines = NULL;
                 i32 result = compile_watch(&info, &output_lines, &watch_arena);
                 
-                KArray(BuildMessage) messages = parse_build_output(output_lines, &watch_arena);
+                current_messages = parse_build_output(output_lines, &watch_arena);
+                tui_state.selected_message_index = 0; // Reset selection
+                tui_state.scroll_offset = 0; // Reset scroll
                 
                 // Update display with results
                 tui_clear_screen();
                 $.prn("🔍 Watching directory: %s", path);
                 $.prn("Press Ctrl+C or 'q' to stop watching.");
                 $.prn("");
-                $.prn("Command: %s", cmd_display.data);
+                $.prn("Command: %s", current_cmd_display.data);
                 $.prn("");
                 
-                tui_display_build_status(messages);
+                tui_display_build_status(current_messages);
                 $.prn("");
             }
         }
 
-        // Check for keyboard input (q to quit)
-        if (tui_check_input()) {
+        // Check for keyboard input
+        InputResult input = tui_check_input();
+        if (input == InputResult_Quit) {
             watch->running = false;
             break;
+        } else if (input == InputResult_NavigateUp) {
+            if (tui_state.selected_message_index > 0) {
+                tui_state.selected_message_index--;
+                // Refresh display
+                tui_clear_screen();
+                $.prn("🔍 Watching directory: %s", path);
+                $.prn("Press Ctrl+C or 'q' to stop watching.");
+                $.prn("");
+                $.prn("Command: %s", current_cmd_display.data);
+                $.prn("");
+                tui_display_build_status(current_messages);
+                $.prn("");
+            }
+        } else if (input == InputResult_NavigateDown) {
+            // Count total navigable messages
+            int total_messages = 0;
+            for (usize i = 0; i < array_length(current_messages); ++i) {
+                if (current_messages[i].type == MessageType_Error || current_messages[i].type == MessageType_Warning) {
+                    total_messages++;
+                }
+            }
+            if (tui_state.selected_message_index < total_messages - 1) {
+                tui_state.selected_message_index++;
+                // Refresh display
+                tui_clear_screen();
+                $.prn("🔍 Watching directory: %s", path);
+                $.prn("Press Ctrl+C or 'q' to stop watching.");
+                $.prn("");
+                $.prn("Command: %s", current_cmd_display.data);
+                $.prn("");
+                tui_display_build_status(current_messages);
+                $.prn("");
+            }
         }
 
         // Small sleep to prevent excessive CPU usage
