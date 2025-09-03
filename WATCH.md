@@ -100,10 +100,9 @@ series of commits.
 - [x] Add file path and line number highlighting
 
 #### Commit 3.3: Interactive error navigation
-- [ ] Allow arrow key navigation through errors/warnings
-- [ ] Display error context (surrounding lines when available)
-- [ ] Add jump-to-file functionality hints
-- [ ] Implement scrolling for long error lists
+- [x] Allow arrow key navigation through errors/warnings
+- [x] Display error context (surrounding lines when available)
+- [x] Implement scrolling for long error lists
 
 #### Commit 3.4: Real-time update display
 - [ ] Add build progress indicators (spinner/progress bar)
