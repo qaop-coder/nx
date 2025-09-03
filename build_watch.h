@@ -24,6 +24,8 @@ typedef struct {
     bool initialised;
     int  selected_message_index;
     int  scroll_offset;
+    int  spinner_state;
+    u64  last_spinner_update;
 #if KORE_OS_LINUX
     struct termios original_termios;
 #endif
@@ -164,6 +166,45 @@ static void tui_display_file_context(const char* file_path, int line_number, Are
     }
     
     fclose(file);
+}
+
+static void tui_display_spinner(const char* message)
+{
+    const char* spinner_chars[] = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
+    const int spinner_count = sizeof(spinner_chars) / sizeof(spinner_chars[0]);
+    
+    u64 current_time = $.time_ms($.time_now());
+    
+    // Update spinner every 100ms
+    if (current_time - tui_state.last_spinner_update >= 100) {
+        tui_state.spinner_state = (tui_state.spinner_state + 1) % spinner_count;
+        tui_state.last_spinner_update = current_time;
+    }
+    
+    tui_print_coloured(KORE_ANSI_CYAN, spinner_chars[tui_state.spinner_state]);
+    $.pr(" %s", message);
+}
+
+static void tui_display_building_status(void)
+{
+    tui_display_spinner("Building...");
+    $.pr("\n");
+}
+
+static void tui_display_timestamp(void)
+{
+    u64 current_time = $.time_ms($.time_now());
+    // Convert to seconds for display
+    u64 seconds = current_time / 1000;
+    u64 minutes = seconds / 60;
+    u64 hours = minutes / 60;
+    
+    char timestamp[64];
+    snprintf(timestamp, sizeof(timestamp), "[%02llu:%02llu:%02llu]", 
+             hours % 24, minutes % 60, seconds % 60);
+    
+    tui_print_coloured(KORE_ANSI_WHITE, timestamp);
+    $.pr(" ");
 }
 
 typedef enum {
@@ -998,7 +1039,9 @@ i32 build_watch(const char* path, CompileInfoFunction setup_func)
     CompileInfo info = setup_func(&watch_arena);
 
     // Initial build with capture
-    $.prn("⚙️  Running initial build...");
+    tui_display_timestamp();
+    tui_display_building_status();
+    
     KArray(String) initial_output = NULL;
     i32 initial_result = compile_watch(&info, &initial_output, &watch_arena);
     
@@ -1013,6 +1056,15 @@ i32 build_watch(const char* path, CompileInfoFunction setup_func)
     String cmd_display = compile_info_to_command(&info);
     $.prn("Command: %s", cmd_display.data);
     $.prn("");
+    
+    // Display initial build completion with timestamp
+    tui_display_timestamp();
+    if (initial_result == 0) {
+        tui_print_coloured(KORE_ANSI_GREEN, "✅ Initial build completed successfully");
+    } else {
+        tui_print_coloured(KORE_ANSI_RED, "❌ Initial build completed with errors");
+    }
+    $.prn("\n\n");
     
     tui_display_build_status(initial_messages);
     $.prn("");
@@ -1042,7 +1094,11 @@ i32 build_watch(const char* path, CompileInfoFunction setup_func)
         if (files_changed) {
             watch->last_change_time = $.time_ms($.time_now());
             watch->build_pending    = true;
-            $.prn("📝 File changes detected, waiting for stabilisation...");
+            
+            // Display file change notification with timestamp
+            tui_display_timestamp();
+            tui_print_coloured(KORE_ANSI_YELLOW, "📝 File changes detected, waiting for stabilisation...");
+            $.pr("\n");
         }
 
         // Check if we should trigger build (debounced)
@@ -1051,7 +1107,10 @@ i32 build_watch(const char* path, CompileInfoFunction setup_func)
             if (current_time - watch->last_change_time >=
                 500) { // 500ms debounce
                 watch->build_pending = false;
-                $.prn("⚙️  Changes stabilised, triggering build...");
+                
+                // Display building status with timestamp
+                tui_display_timestamp();
+                tui_display_building_status();
 
                 // Capture build output using proper compile_watch
                 KArray(String) output_lines = NULL;
@@ -1068,6 +1127,15 @@ i32 build_watch(const char* path, CompileInfoFunction setup_func)
                 $.prn("");
                 $.prn("Command: %s", current_cmd_display.data);
                 $.prn("");
+                
+                // Display build completion with timestamp
+                tui_display_timestamp();
+                if (result == 0) {
+                    tui_print_coloured(KORE_ANSI_GREEN, "✅ Build completed successfully");
+                } else {
+                    tui_print_coloured(KORE_ANSI_RED, "❌ Build completed with errors");
+                }
+                $.pr("\n\n");
                 
                 tui_display_build_status(current_messages);
                 $.prn("");

@@ -105,10 +105,10 @@ series of commits.
 - [x] Implement scrolling for long error lists
 
 #### Commit 3.4: Real-time update display
-- [ ] Add build progress indicators (spinner/progress bar)
-- [ ] Show "Building..." status during compilation
-- [ ] Display file change notifications
-- [ ] Add timestamp display for builds
+- [x] Add build progress indicators (spinner/progress bar)
+- [x] Show "Building..." status during compilation
+- [x] Display file change notifications
+- [x] Add timestamp display for builds
 
 ### Milestone 4: Enhanced Features and Polish
 **Goal**: Add advanced features and improve user experience
