@@ -10,9 +10,11 @@
 
 #if KORE_OS_WINDOWS
 #    include <sys/stat.h>
+#    include <process.h>
 #else
 #    include <dirent.h>
 #    include <sys/stat.h>
+#    include <sys/wait.h>
 #endif
 
 //
@@ -468,6 +470,8 @@ typedef struct {
     KArray(String) files;
     KArray(String) libraries;
     KArray(String) include_paths;
+    KArray(String) ignore_patterns;
+    KArray(String) watch_extensions;
     bool   debug;
     String output_file;
     String output_folder;
@@ -477,11 +481,13 @@ typedef struct {
 CompileInfo compile_info_init(Arena* arena, const char* output_file)
 {
     CompileInfo info;
-    info.arena         = arena;
-    info.files         = nullptr;
-    info.libraries     = nullptr;
-    info.include_paths = nullptr;
-    info.debug         = false;
+    info.arena           = arena;
+    info.files           = nullptr;
+    info.libraries       = nullptr;
+    info.include_paths   = nullptr;
+    info.ignore_patterns = nullptr;
+    info.watch_extensions = nullptr;
+    info.debug           = false;
 
     StringBuilder sb   = string_builder_init(arena);
     string_builder_append_zstring(&sb, output_file);
@@ -544,6 +550,20 @@ void compile_info_add_flags(CompileInfo* info, const char* flags)
     StringBuilder sb = string_builder_init(info->arena);
     string_builder_append_zstring(&sb, flags);
     info->flags = sb.str;
+}
+
+void compile_info_add_ignore_pattern(CompileInfo* info, const char* pattern)
+{
+    StringBuilder sb = string_builder_init(info->arena);
+    string_builder_append_zstring(&sb, pattern);
+    array_add(info->ignore_patterns, sb.str);
+}
+
+void compile_info_add_watch_extension(CompileInfo* info, const char* extension)
+{
+    StringBuilder sb = string_builder_init(info->arena);
+    string_builder_append_zstring(&sb, extension);
+    array_add(info->watch_extensions, sb.str);
 }
 
 void compile_info_dump(CompileInfo* info)

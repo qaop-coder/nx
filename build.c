@@ -29,6 +29,12 @@ CompileInfo build_create_compile_info(Arena* arena)
     compile_info_add_include_path(&info, "3rd/kore");
     compile_info_add_libraries(&info, libraries);
     compile_info_add_flags(&info, "-std=c23 -Wall -Wextra");
+    
+    // Watch configuration is optional - defaults to .c/.h/.cpp/.hpp if not specified
+    // compile_info_add_watch_extension(&info, ".c");
+    // compile_info_add_watch_extension(&info, ".h");
+    // compile_info_add_ignore_pattern(&info, ".tmp");
+    // compile_info_add_ignore_pattern(&info, ".bak");
 
     return info;
 }

@@ -19,6 +19,12 @@
 // Terminal User Interface (TUI) Framework
 //
 
+typedef enum {
+    TUIMode_List,
+    TUIMode_SplitPane,
+    TUIMode_Search
+} TUIMode;
+
 typedef struct {
     bool colour_support;
     bool initialised;
@@ -26,10 +32,50 @@ typedef struct {
     int  scroll_offset;
     int  spinner_state;
     u64  last_spinner_update;
+    TUIMode mode;
+    int  terminal_width;
+    int  terminal_height;
+    char search_query[256];
+    int  search_results_count;
+    int  history_index;
+    int  history_count;
 #if KORE_OS_LINUX
     struct termios original_termios;
 #endif
 } TUIState;
+
+//
+// Build message types
+//
+
+typedef enum {
+    MessageType_Error,
+    MessageType_Warning,
+    MessageType_Note,
+    MessageType_Unknown
+} MessageType;
+
+typedef struct {
+    MessageType type;
+    String      file_path;
+    int         line_number;
+    int         column_number;
+    String      message;
+} BuildMessage;
+
+#define MAX_BUILD_HISTORY 10
+
+typedef struct {
+    KArray(BuildMessage) messages;
+    u64 timestamp;
+    u64 build_duration_ms;
+    i32 exit_code;
+    usize memory_used;
+    Arena* arena;
+} BuildHistoryEntry;
+
+static BuildHistoryEntry build_history[MAX_BUILD_HISTORY];
+static int history_write_index = 0;
 
 static TUIState tui_state = {0};
 
@@ -103,20 +149,26 @@ static void tui_print_coloured(const char* colour, const char* text)
     }
 }
 
-static int tui_get_terminal_height(void)
+static void tui_get_terminal_size(void)
 {
 #if KORE_OS_WINDOWS
     CONSOLE_SCREEN_BUFFER_INFO csbi;
     if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi)) {
-        return csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
+        tui_state.terminal_width = csbi.srWindow.Right - csbi.srWindow.Left + 1;
+        tui_state.terminal_height = csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
+    } else {
+        tui_state.terminal_width = 80;
+        tui_state.terminal_height = 25;
     }
-    return 25; // Default fallback
 #else
     struct winsize w;
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0) {
-        return w.ws_row;
+        tui_state.terminal_width = w.ws_col;
+        tui_state.terminal_height = w.ws_row;
+    } else {
+        tui_state.terminal_width = 80;
+        tui_state.terminal_height = 25;
     }
-    return 25; // Default fallback
 #endif
 }
 
@@ -211,7 +263,12 @@ typedef enum {
     InputResult_Continue,
     InputResult_Quit,
     InputResult_NavigateUp,
-    InputResult_NavigateDown
+    InputResult_NavigateDown,
+    InputResult_ToggleMode,
+    InputResult_StartSearch,
+    InputResult_CancelSearch,
+    InputResult_HistoryPrev,
+    InputResult_HistoryNext
 } InputResult;
 
 static InputResult tui_check_input(void)
@@ -221,6 +278,18 @@ static InputResult tui_check_input(void)
         char ch = _getch();
         if (ch == 'q' || ch == 'Q' || ch == 27) { // 27 = ESC
             return InputResult_Quit;
+        }
+        if (ch == 't' || ch == 'T') { // Toggle split-pane mode
+            return InputResult_ToggleMode;
+        }
+        if (ch == '/' || ch == 's' || ch == 'S') { // Start search
+            return InputResult_StartSearch;
+        }
+        if (ch == 'h' || ch == 'H') { // History previous
+            return InputResult_HistoryPrev;
+        }
+        if (ch == 'j' || ch == 'J') { // History next
+            return InputResult_HistoryNext;
         }
         // Handle arrow keys (they come as escape sequences)
         if (ch == 0 || (unsigned char)ch == 224) { // Extended key prefix on Windows
@@ -259,6 +328,18 @@ static InputResult tui_check_input(void)
                     }
                     return InputResult_Quit;
                 }
+                if (ch == 't' || ch == 'T') { // Toggle split-pane mode
+                    return InputResult_ToggleMode;
+                }
+                if (ch == '/' || ch == 's' || ch == 'S') { // Start search
+                    return InputResult_StartSearch;
+                }
+                if (ch == 'h' || ch == 'H') { // History previous
+                    return InputResult_HistoryPrev;
+                }
+                if (ch == 'j' || ch == 'J') { // History next
+                    return InputResult_HistoryNext;
+                }
             }
         }
     }
@@ -267,23 +348,8 @@ static InputResult tui_check_input(void)
 }
 
 //
-// Build message parsing
+// Build message parsing functions
 //
-
-typedef enum {
-    MessageType_Error,
-    MessageType_Warning,
-    MessageType_Note,
-    MessageType_Unknown
-} MessageType;
-
-typedef struct {
-    MessageType type;
-    String      file_path;
-    int         line_number;
-    int         column_number;
-    String      message;
-} BuildMessage;
 
 static bool string_contains_zstring(String str, const char* needle)
 {
@@ -449,8 +515,8 @@ static void tui_display_warnings_navigable(KArray(BuildMessage) messages)
     }
     
     // Calculate display bounds for scrolling
-    int terminal_height = tui_get_terminal_height();
-    int max_display_lines = terminal_height - 10; // Reserve space for header/footer
+    tui_get_terminal_size();
+    int max_display_lines = tui_state.terminal_height - 10; // Reserve space for header/footer
     int display_count = warning_count > max_display_lines ? max_display_lines : warning_count;
     
     // Adjust scroll offset to keep selected item visible
@@ -546,8 +612,8 @@ static void tui_display_errors_navigable(KArray(BuildMessage) messages)
     }
     
     // Calculate display bounds for scrolling
-    int terminal_height = tui_get_terminal_height();
-    int max_display_lines = terminal_height - 10; // Reserve space for header/footer
+    tui_get_terminal_size();
+    int max_display_lines = tui_state.terminal_height - 10; // Reserve space for header/footer
     int display_count = error_count > max_display_lines ? max_display_lines : error_count;
     
     // Adjust scroll offset to keep selected item visible
@@ -605,10 +671,312 @@ static void tui_display_errors_navigable(KArray(BuildMessage) messages)
     array_free(errors);
 }
 
+// Extract unique file paths from messages
+static KArray(String) tui_extract_file_list(KArray(BuildMessage) messages, Arena* arena)
+{
+    KArray(String) files = NULL;
+    
+    for (usize i = 0; i < array_length(messages); ++i) {
+        if (messages[i].file_path.data && messages[i].file_path.length > 0) {
+            // Check if we already have this file
+            bool already_added = false;
+            for (usize j = 0; j < array_length(files); ++j) {
+                if (files[j].length == messages[i].file_path.length &&
+                    strncmp(files[j].data, messages[i].file_path.data, files[j].length) == 0) {
+                    already_added = true;
+                    break;
+                }
+            }
+            if (!already_added) {
+                array_add(files, messages[i].file_path);
+            }
+        }
+    }
+    
+    return files;
+}
+
+// Filter messages based on search query
+static KArray(BuildMessage) tui_filter_messages(KArray(BuildMessage) messages, const char* query, Arena* arena)
+{
+    KArray(BuildMessage) filtered = NULL;
+    
+    if (!query || strlen(query) == 0) {
+        // No filter, return all messages
+        for (usize i = 0; i < array_length(messages); ++i) {
+            array_add(filtered, messages[i]);
+        }
+        return filtered;
+    }
+    
+    // Case-insensitive search through message text and file paths
+    for (usize i = 0; i < array_length(messages); ++i) {
+        BuildMessage* msg = &messages[i];
+        bool matches = false;
+        
+        // Search in message text
+        if (msg->message.data && strstr(msg->message.data, query) != NULL) {
+            matches = true;
+        }
+        
+        // Search in file path
+        if (!matches && msg->file_path.data && strstr(msg->file_path.data, query) != NULL) {
+            matches = true;
+        }
+        
+        if (matches) {
+            array_add(filtered, *msg);
+        }
+    }
+    
+    return filtered;
+}
+
+static void tui_display_search_mode(KArray(BuildMessage) all_messages, Arena* arena)
+{
+    KArray(BuildMessage) filtered = tui_filter_messages(all_messages, tui_state.search_query, arena);
+    tui_state.search_results_count = array_length(filtered);
+    
+    $.pr("Search: %s (%d results) [Press ESC to cancel]\n", 
+         tui_state.search_query, tui_state.search_results_count);
+    $.pr("────────────────────────────────────────────────────────\n");
+    
+    if (tui_state.search_results_count == 0) {
+        tui_print_coloured(KORE_ANSI_YELLOW, "No matches found.");
+        $.pr("\n");
+    } else {
+        // Display filtered results
+        for (usize i = 0; i < array_length(filtered); ++i) {
+            BuildMessage* msg = &filtered[i];
+            
+            bool is_selected = (i == tui_state.selected_message_index);
+            
+            if (is_selected) {
+                $.pr("▶ ");
+                tui_print_coloured(KORE_ANSI_BOLD, "");
+            } else {
+                $.pr("  ");
+            }
+            
+            // Display message type with color
+            if (msg->type == MessageType_Error) {
+                tui_print_coloured(KORE_ANSI_RED, "ERROR");
+            } else if (msg->type == MessageType_Warning) {
+                tui_print_coloured(KORE_ANSI_YELLOW, "WARN ");
+            } else {
+                $.pr("INFO ");
+            }
+            
+            $.pr(" %s", msg->file_path.data ? msg->file_path.data : "");
+            if (msg->line_number != -1) {
+                $.pr(":%d", msg->line_number);
+            }
+            $.pr(": %s", msg->message.data ? msg->message.data : "");
+            
+            if (is_selected) {
+                tui_print_coloured(KORE_ANSI_RESET, "");
+            }
+            $.pr("\n");
+            
+            // Show context for selected result
+            if (is_selected && msg->file_path.data && msg->line_number > 0) {
+                $.pr("\n");
+                tui_display_file_context(msg->file_path.data, msg->line_number, NULL);
+                $.pr("\n");
+            }
+        }
+    }
+    
+    array_free(filtered);
+}
+
+// Build history management
+static void tui_add_to_history(KArray(BuildMessage) messages, i32 exit_code, u64 duration_ms, Arena* arena)
+{
+    // Free old arena if it exists
+    if (build_history[history_write_index].arena) {
+        arena_free(build_history[history_write_index].arena);
+    }
+    
+    // Create new arena for this history entry
+    Arena* hist_arena = KORE_ALLOC(sizeof(Arena));
+    *hist_arena = arena_init();
+    
+    // Copy messages to history arena
+    KArray(BuildMessage) hist_messages = NULL;
+    for (usize i = 0; i < array_length(messages); ++i) {
+        BuildMessage msg = messages[i];
+        
+        // Copy strings to history arena
+        if (msg.file_path.data) {
+            StringBuilder sb = string_builder_init(hist_arena);
+            string_builder_append_string(&sb, msg.file_path);
+            string_builder_null_terminate(&sb);
+            msg.file_path = sb.str;
+        }
+        
+        if (msg.message.data) {
+            StringBuilder sb = string_builder_init(hist_arena);
+            string_builder_append_string(&sb, msg.message);
+            string_builder_null_terminate(&sb);
+            msg.message = sb.str;
+        }
+        
+        array_add(hist_messages, msg);
+    }
+    
+    build_history[history_write_index].messages = hist_messages;
+    build_history[history_write_index].timestamp = $.time_ms($.time_now());
+    build_history[history_write_index].build_duration_ms = duration_ms;
+    build_history[history_write_index].exit_code = exit_code;
+    build_history[history_write_index].memory_used = arena->cursor; // Rough memory usage estimate
+    build_history[history_write_index].arena = hist_arena;
+    
+    history_write_index = (history_write_index + 1) % MAX_BUILD_HISTORY;
+    if (tui_state.history_count < MAX_BUILD_HISTORY) {
+        tui_state.history_count++;
+    }
+}
+
+static KArray(BuildMessage) tui_get_history_messages(int relative_index)
+{
+    if (tui_state.history_count == 0) {
+        return NULL;
+    }
+    
+    int actual_index = (history_write_index - 1 - relative_index + MAX_BUILD_HISTORY) % MAX_BUILD_HISTORY;
+    if (actual_index < 0 || actual_index >= tui_state.history_count) {
+        return NULL;
+    }
+    
+    return build_history[actual_index].messages;
+}
+
+static void tui_display_performance_metrics(void)
+{
+    if (tui_state.history_count == 0) return;
+    
+    // Get current build metrics
+    int current_idx = (history_write_index - 1 + MAX_BUILD_HISTORY) % MAX_BUILD_HISTORY;
+    BuildHistoryEntry* current = &build_history[current_idx];
+    
+    $.pr("📊 Build took %llu ms, Memory: %zu bytes", 
+         current->build_duration_ms, current->memory_used);
+    
+    // Show average if we have multiple builds
+    if (tui_state.history_count > 1) {
+        u64 total_duration = 0;
+        usize total_memory = 0;
+        
+        int count = tui_state.history_count > 5 ? 5 : tui_state.history_count; // Last 5 builds
+        for (int i = 0; i < count; ++i) {
+            int idx = (history_write_index - 1 - i + MAX_BUILD_HISTORY) % MAX_BUILD_HISTORY;
+            total_duration += build_history[idx].build_duration_ms;
+            total_memory += build_history[idx].memory_used;
+        }
+        
+        u64 avg_duration = total_duration / count;
+        usize avg_memory = total_memory / count;
+        
+        $.pr(" (Avg: %llu ms, %zu bytes)", avg_duration, avg_memory);
+    }
+    
+    $.pr("\n");
+}
+
+static void tui_display_split_pane(KArray(BuildMessage) messages, Arena* arena)
+{
+    tui_get_terminal_size();
+    int pane_width = tui_state.terminal_width / 2 - 2; // Leave space for separator
+    
+    // Extract unique files
+    KArray(String) files = tui_extract_file_list(messages, arena);
+    
+    // Display header
+    $.pr("Files");
+    for (int i = 5; i < pane_width; ++i) $.pr(" ");
+    $.pr("│ Error Details\n");
+    
+    // Display separator line
+    for (int i = 0; i < pane_width; ++i) $.pr("─");
+    $.pr("┼");
+    for (int i = 0; i < pane_width; ++i) $.pr("─");
+    $.pr("\n");
+    
+    // Display file list (left pane) and selected error details (right pane)
+    int max_display_lines = tui_state.terminal_height - 8; // Reserve space for header/footer
+    
+    for (int line = 0; line < max_display_lines; ++line) {
+        // Left pane: file list
+        if (line < array_length(files)) {
+            String file = files[line];
+            // Extract just the filename from the path
+            const char* filename = strrchr(file.data, '/');
+            if (!filename) filename = strrchr(file.data, '\\');
+            if (!filename) filename = file.data; else filename++;
+            
+            char display_name[256];
+            snprintf(display_name, sizeof(display_name), "%.30s", filename);
+            
+            // Count errors/warnings for this file
+            int file_issues = 0;
+            for (usize i = 0; i < array_length(messages); ++i) {
+                if (messages[i].file_path.length == file.length &&
+                    strncmp(messages[i].file_path.data, file.data, file.length) == 0) {
+                    file_issues++;
+                }
+            }
+            
+            $.pr("%-30s (%d)", display_name, file_issues);
+        } else {
+            for (int i = 0; i < pane_width; ++i) $.pr(" ");
+        }
+        
+        $.pr("│ ");
+        
+        // Right pane: error details for selected message
+        if (tui_state.selected_message_index < array_length(messages) && line < 5) {
+            BuildMessage* msg = &messages[tui_state.selected_message_index];
+            
+            if (line == 0 && msg->file_path.data) {
+                $.pr("File: %s", msg->file_path.data);
+            } else if (line == 1 && msg->line_number != -1) {
+                $.pr("Line: %d", msg->line_number);
+                if (msg->column_number != -1) {
+                    $.pr(", Column: %d", msg->column_number);
+                }
+            } else if (line == 2 && msg->message.data) {
+                char truncated_msg[256];
+                snprintf(truncated_msg, sizeof(truncated_msg), "%.60s", msg->message.data);
+                if (msg->type == MessageType_Error) {
+                    tui_print_coloured(KORE_ANSI_RED, "Error: ");
+                } else if (msg->type == MessageType_Warning) {
+                    tui_print_coloured(KORE_ANSI_YELLOW, "Warning: ");
+                }
+                $.pr("%s", truncated_msg);
+            }
+        }
+        
+        $.pr("\n");
+    }
+    
+    array_free(files);
+}
+
 static void tui_display_build_status(KArray(BuildMessage) messages)
 {
     if (!messages || array_length(messages) == 0) {
         tui_display_success();
+        return;
+    }
+    
+    if (tui_state.mode == TUIMode_SplitPane) {
+        tui_display_split_pane(messages, NULL);
+        return;
+    }
+    
+    if (tui_state.mode == TUIMode_Search) {
+        tui_display_search_mode(messages, NULL);
         return;
     }
     
@@ -639,6 +1007,7 @@ typedef struct {
     bool   running;
     u64    last_change_time;
     bool   build_pending;
+    CompileInfo* compile_info;
 
 #if KORE_OS_WINDOWS
     HANDLE     directory_handle;
@@ -663,20 +1032,51 @@ i32 build_watch(const char* path, CompileInfoFunction setup_func);
 
 static volatile bool watch_should_stop = false;
 
-static bool is_relevant_file_extension(const char* filename)
+static bool is_relevant_file_extension(const char* filename, CompileInfo* info)
 {
     const char* ext = strrchr(filename, '.');
     if (!ext) {
         return false;
     }
 
-    return strcmp(ext, ".c") == 0 || strcmp(ext, ".h") == 0 ||
-           strcmp(ext, ".cpp") == 0 || strcmp(ext, ".hpp") == 0;
+    // If no watch extensions specified, use defaults
+    if (!info->watch_extensions || array_length(info->watch_extensions) == 0) {
+        return strcmp(ext, ".c") == 0 || strcmp(ext, ".h") == 0 ||
+               strcmp(ext, ".cpp") == 0 || strcmp(ext, ".hpp") == 0;
+    }
+    
+    // Check against configured extensions
+    for (usize i = 0; i < array_length(info->watch_extensions); ++i) {
+        if (strcmp(ext, info->watch_extensions[i].data) == 0) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+static bool is_ignored_file(const char* filename, CompileInfo* info)
+{
+    if (!info->ignore_patterns || array_length(info->ignore_patterns) == 0) {
+        return false;
+    }
+    
+    // Simple pattern matching for ignore patterns
+    for (usize i = 0; i < array_length(info->ignore_patterns); ++i) {
+        const char* pattern = info->ignore_patterns[i].data;
+        
+        // Simple wildcard matching - just check if filename contains pattern
+        if (strstr(filename, pattern) != NULL) {
+            return true;
+        }
+    }
+    
+    return false;
 }
 
 #if KORE_OS_WINDOWS
 
-static WatchInfo* watch_init_windows(Arena* arena, const char* path)
+static WatchInfo* watch_init_windows(Arena* arena, const char* path, CompileInfo* info)
 {
     WatchInfo* watch        = arena_alloc(arena, sizeof(WatchInfo));
     watch->arena            = arena;
@@ -685,6 +1085,7 @@ static WatchInfo* watch_init_windows(Arena* arena, const char* path)
     watch->running          = false;
     watch->last_change_time = 0;
     watch->build_pending    = false;
+    watch->compile_info     = info;
 
     // Convert path to wide string for Windows API
     int    path_len  = MultiByteToWideChar(CP_UTF8, 0, path, -1, NULL, 0);
@@ -761,6 +1162,9 @@ static bool watch_process_changes_windows(WatchInfo* watch, bool* files_changed)
         return false;
     }
 
+    // If we get here, we received a notification
+    printf("CHANGE DETECTED: %lu bytes\n", bytes_transferred);
+
     if (bytes_transferred == 0) {
         return true; // Continue watching
     }
@@ -791,8 +1195,9 @@ static bool watch_process_changes_windows(WatchInfo* watch, bool* files_changed)
                             NULL);
         filename[filename_len] = '\0';
 
-        // Check if this is a relevant file
-        if (is_relevant_file_extension(filename)) {
+        // Check if this is a relevant file and not ignored
+        if (!is_ignored_file(filename, watch->compile_info) && 
+            is_relevant_file_extension(filename, watch->compile_info)) {
             *files_changed = true;
         }
 
@@ -823,7 +1228,7 @@ static void watch_cleanup_windows(WatchInfo* watch)
 
 #else // KORE_OS_LINUX || KORE_OS_MACOS
 
-static WatchInfo* watch_init_linux(Arena* arena, const char* path)
+static WatchInfo* watch_init_linux(Arena* arena, const char* path, CompileInfo* info)
 {
     WatchInfo* watch         = arena_alloc(arena, sizeof(WatchInfo));
     watch->arena             = arena;
@@ -833,6 +1238,7 @@ static WatchInfo* watch_init_linux(Arena* arena, const char* path)
     watch->last_change_time  = 0;
     watch->build_pending     = false;
     watch->watch_descriptors = NULL;
+    watch->compile_info      = info;
 
     // Initialize inotify
     watch->inotify_fd        = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
@@ -901,8 +1307,9 @@ static bool watch_process_changes_linux(WatchInfo* watch, bool* files_changed)
         if (event->len > 0) {
             const char* filename = event->name;
 
-            // Check if this is a relevant file
-            if (is_relevant_file_extension(filename)) {
+            // Check if this is a relevant file and not ignored
+            if (!is_ignored_file(filename, watch->compile_info) && 
+                is_relevant_file_extension(filename, watch->compile_info)) {
                 *files_changed = true;
             }
 
@@ -1014,15 +1421,23 @@ i32 build_watch(const char* path, CompileInfoFunction setup_func)
     // Setup signal handling for graceful shutdown
     setup_signal_handlers();
 
+    // Setup CompileInfo using callback
+    CompileInfo info = setup_func(&watch_arena);
+
     // Initialise platform-specific watching
 #if KORE_OS_WINDOWS
-    watch = watch_init_windows(&watch_arena, path);
-    if (!watch || !watch_start_monitoring_windows(watch)) {
-        fprintf(stderr, "Failed to start file watching on Windows\n");
+    watch = watch_init_windows(&watch_arena, path, &info);
+    if (!watch) {
+        fprintf(stderr, "Failed to initialize file watching on Windows\n");
         goto cleanup;
     }
+    if (!watch_start_monitoring_windows(watch)) {
+        fprintf(stderr, "Failed to start file monitoring on Windows\n");
+        goto cleanup;
+    }
+    printf("File watching started for: %s\n", path);
 #else
-    watch = watch_init_linux(&watch_arena, path);
+    watch = watch_init_linux(&watch_arena, path, &info);
     if (!watch || !watch_add_directory_linux(watch, path)) {
         fprintf(stderr, "Failed to start file watching on Linux\n");
         goto cleanup;
@@ -1032,29 +1447,35 @@ i32 build_watch(const char* path, CompileInfoFunction setup_func)
     watch->running = true;
     tui_clear_screen();
     $.prn("🔍 Watching directory: %s", path);
-    $.prn("Press Ctrl+C or 'q' to stop watching.");
+    $.prn("Press Ctrl+C/'q' to quit, 't' to toggle view, '/' to search, 'h'/'j' for history.");
     $.prn("");
-
-    // Setup CompileInfo using callback
-    CompileInfo info = setup_func(&watch_arena);
 
     // Initial build with capture
     tui_display_timestamp();
     tui_display_building_status();
     
+    u64 build_start = $.time_ms($.time_now());
     KArray(String) initial_output = NULL;
     i32 initial_result = compile_watch(&info, &initial_output, &watch_arena);
+    u64 build_duration = $.time_ms($.time_now()) - build_start;
     
     KArray(BuildMessage) initial_messages = parse_build_output(initial_output, &watch_arena);
     
+    // Add initial build to history
+    tui_add_to_history(initial_messages, initial_result, build_duration, &watch_arena);
+    
     tui_clear_screen();
     $.prn("🔍 Watching directory: %s", path);
-    $.prn("Press Ctrl+C or 'q' to stop watching.");
+    $.prn("Press Ctrl+C/'q' to quit, 't' to toggle view, '/' to search, 'h'/'j' for history.");
     $.prn("");
     
     // Show the command that was executed
     String cmd_display = compile_info_to_command(&info);
-    $.prn("Command: %s", cmd_display.data);
+    if (cmd_display.data && cmd_display.length > 0) {
+        $.prn("Command: %.*s", (int)cmd_display.length, cmd_display.data);
+    } else {
+        $.prn("Command: [COMMAND GENERATION FAILED]");
+    }
     $.prn("");
     
     // Display initial build completion with timestamp
@@ -1113,17 +1534,23 @@ i32 build_watch(const char* path, CompileInfoFunction setup_func)
                 tui_display_building_status();
 
                 // Capture build output using proper compile_watch
+                u64 build_start = $.time_ms($.time_now());
                 KArray(String) output_lines = NULL;
                 i32 result = compile_watch(&info, &output_lines, &watch_arena);
+                u64 build_duration = $.time_ms($.time_now()) - build_start;
                 
                 current_messages = parse_build_output(output_lines, &watch_arena);
                 tui_state.selected_message_index = 0; // Reset selection
                 tui_state.scroll_offset = 0; // Reset scroll
+                tui_state.history_index = 0; // Reset to latest
+                
+                // Add to history
+                tui_add_to_history(current_messages, result, build_duration, &watch_arena);
                 
                 // Update display with results
                 tui_clear_screen();
                 $.prn("🔍 Watching directory: %s", path);
-                $.prn("Press Ctrl+C or 'q' to stop watching.");
+                $.prn("Press Ctrl+C/'q' to quit, 't' to toggle view, '/' to search, 'h'/'j' for history.");
                 $.prn("");
                 $.prn("Command: %s", current_cmd_display.data);
                 $.prn("");
@@ -1135,7 +1562,11 @@ i32 build_watch(const char* path, CompileInfoFunction setup_func)
                 } else {
                     tui_print_coloured(KORE_ANSI_RED, "❌ Build completed with errors");
                 }
-                $.pr("\n\n");
+                $.pr("\n");
+                
+                // Show performance metrics
+                tui_display_performance_metrics();
+                $.pr("\n");
                 
                 tui_display_build_status(current_messages);
                 $.prn("");
@@ -1153,7 +1584,7 @@ i32 build_watch(const char* path, CompileInfoFunction setup_func)
                 // Refresh display
                 tui_clear_screen();
                 $.prn("🔍 Watching directory: %s", path);
-                $.prn("Press Ctrl+C or 'q' to stop watching.");
+                $.prn("Press Ctrl+C/'q' to quit, 't' to toggle view, '/' to search, 'h'/'j' for history.");
                 $.prn("");
                 $.prn("Command: %s", current_cmd_display.data);
                 $.prn("");
@@ -1173,12 +1604,130 @@ i32 build_watch(const char* path, CompileInfoFunction setup_func)
                 // Refresh display
                 tui_clear_screen();
                 $.prn("🔍 Watching directory: %s", path);
-                $.prn("Press Ctrl+C or 'q' to stop watching.");
+                $.prn("Press Ctrl+C/'q' to quit, 't' to toggle view, '/' to search, 'h'/'j' for history.");
                 $.prn("");
                 $.prn("Command: %s", current_cmd_display.data);
                 $.prn("");
                 tui_display_build_status(current_messages);
                 $.prn("");
+            }
+        } else if (input == InputResult_ToggleMode) {
+            // Toggle between list and split-pane mode
+            tui_state.mode = (tui_state.mode == TUIMode_List) ? TUIMode_SplitPane : TUIMode_List;
+            
+            // Refresh display
+            tui_clear_screen();
+            $.prn("🔍 Watching directory: %s", path);
+            $.prn("Press Ctrl+C/'q' to quit, 't' to toggle view, '/' to search, 'h'/'j' for history.");
+            $.prn("");
+            $.prn("Command: %s", current_cmd_display.data);
+            $.prn("");
+            
+            // Re-display build completion status
+            tui_display_timestamp();
+            if (array_length(current_messages) > 0) {
+                bool has_errors = false;
+                for (usize i = 0; i < array_length(current_messages); ++i) {
+                    if (current_messages[i].type == MessageType_Error) {
+                        has_errors = true;
+                        break;
+                    }
+                }
+                if (has_errors) {
+                    tui_print_coloured(KORE_ANSI_RED, "❌ Build completed with errors");
+                } else {
+                    tui_print_coloured(KORE_ANSI_GREEN, "✅ Build completed successfully");
+                }
+            } else {
+                tui_print_coloured(KORE_ANSI_GREEN, "✅ Build completed successfully");
+            }
+            const char* mode_name = "List";
+            if (tui_state.mode == TUIMode_SplitPane) mode_name = "Split-pane";
+            else if (tui_state.mode == TUIMode_Search) mode_name = "Search";
+            $.pr(" (Mode: %s)\n\n", mode_name);
+            
+            tui_display_build_status(current_messages);
+            $.prn("");
+        } else if (input == InputResult_StartSearch) {
+            // Enter search mode
+            tui_state.mode = TUIMode_Search;
+            tui_state.search_query[0] = '\0'; // Clear search
+            tui_state.selected_message_index = 0;
+            
+            // For now, just display search mode - in a full implementation you'd handle text input
+            // Refresh display
+            tui_clear_screen();
+            $.prn("🔍 Watching directory: %s", path);
+            $.prn("Press Ctrl+C/'q' to quit, 't' to toggle view, '/' to search, 'h'/'j' for history.");
+            $.prn("");
+            $.prn("Command: %s", current_cmd_display.data);
+            $.prn("");
+            
+            tui_display_build_status(current_messages);
+            $.prn("");
+        } else if (input == InputResult_HistoryPrev) {
+            // Navigate to older build in history
+            if (tui_state.history_index < tui_state.history_count - 1) {
+                tui_state.history_index++;
+                KArray(BuildMessage) hist_messages = tui_get_history_messages(tui_state.history_index);
+                if (hist_messages) {
+                    current_messages = hist_messages;
+                    tui_state.selected_message_index = 0;
+                    
+                    // Refresh display
+                    tui_clear_screen();
+                    $.prn("🔍 Watching directory: %s", path);
+                    $.prn("Press Ctrl+C/'q' to quit, 't' to toggle view, '/' to search, 'h'/'j' for history.");
+                    $.prn("");
+                    $.prn("Command: %s", current_cmd_display.data);
+                    $.prn("");
+                    
+                    tui_display_timestamp();
+                    if (tui_state.history_index == 0) {
+                        tui_print_coloured(KORE_ANSI_CYAN, "📅 Current build");
+                    } else {
+                        char hist_info[64];
+                        snprintf(hist_info, sizeof(hist_info), "📅 History #%d (of %d)", 
+                                tui_state.history_index + 1, tui_state.history_count);
+                        tui_print_coloured(KORE_ANSI_CYAN, hist_info);
+                    }
+                    $.pr("\n\n");
+                    
+                    tui_display_build_status(current_messages);
+                    $.prn("");
+                }
+            }
+        } else if (input == InputResult_HistoryNext) {
+            // Navigate to newer build in history
+            if (tui_state.history_index > 0) {
+                tui_state.history_index--;
+                KArray(BuildMessage) hist_messages = tui_get_history_messages(tui_state.history_index);
+                if (hist_messages) {
+                    current_messages = hist_messages;
+                    tui_state.selected_message_index = 0;
+                    
+                    // Refresh display
+                    tui_clear_screen();
+                    $.prn("🔍 Watching directory: %s", path);
+                    $.prn("Press Ctrl+C/'q' to quit, 't' to toggle view, '/' to search, 'h'/'j' for history.");
+                    $.prn("");
+                    $.prn("Command: %s", current_cmd_display.data);
+                    $.prn("");
+                    
+                    tui_display_timestamp();
+                    if (tui_state.history_index == 0) {
+                        tui_print_coloured(KORE_ANSI_CYAN, "📅 Current build");
+                    } else {
+                        char hist_info[64];
+                        snprintf(hist_info, sizeof(hist_info), "📅 History #%d (of %d)", 
+                                tui_state.history_index + 1, tui_state.history_count);
+                        tui_print_coloured(KORE_ANSI_CYAN, hist_info);
+                    }
+                    $.pr("\n\n");
+                    
+                    tui_display_build_status(current_messages);
+                    $.prn("");
+                }
             }
         }
 

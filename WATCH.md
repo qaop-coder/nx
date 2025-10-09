@@ -114,10 +114,9 @@ series of commits.
 **Goal**: Add advanced features and improve user experience
 
 #### Commit 4.1: Configuration and filtering
-- [ ] Add configuration file support (`.buildwatch.json`)
-- [ ] Implement ignore patterns (similar to `.gitignore`)
-- [ ] Allow custom file extension filters
-- [ ] Add build timeout configuration
+- [x] Implement ignore patterns via CompileInfo structure
+- [x] Allow custom file extension filters via CompileInfo structure
+- [x] Created BUILD.md manual for build.c configuration
 
 #### Commit 4.2: Build performance optimization
 - [ ] Implement incremental build detection
@@ -126,10 +125,10 @@ series of commits.
 - [ ] Add build statistics (time tracking, success rate)
 
 #### Commit 4.3: Enhanced TUI features
-- [ ] Add split-pane view (file list + error details)
-- [ ] Implement search functionality within errors
-- [ ] Add build history navigation
-- [ ] Include memory usage and performance metrics
+- [x] Add split-pane view (file list + error details)
+- [x] Implement search functionality within errors
+- [x] Add build history navigation
+- [x] Include memory usage and performance metrics
 
 #### Commit 4.4: Testing and documentation
 - [ ] Add unit tests for file watching functionality

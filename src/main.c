@@ -11,10 +11,10 @@
 
 int main(int argc, char** argv)
 {
-    KORE_UNUSED(argc);
-    KORE_UNUSED(argv);
+    // KORE_UNUSED(argc);
+    // KORE_UNUSED(argv);
 
-    $.init();
+    int $.init();
 
     Memory memory = {0};
     mem_init(&memory);
