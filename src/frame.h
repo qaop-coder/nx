@@ -39,9 +39,10 @@ typedef struct {
 // Window API
 //------------------------------------------------------------------------------
 
+// Create a window (frame) that will
 Frame frame_open(int width, int height, const char* title);
 bool  frame_loop(Frame* w);
-u32*  frame_add_layer(Frame* w, int width, int height);
+u32*  frame_add_pixels_layer(Frame* w, int width, int height);
 f64   frame_fps(Frame* w);
 
 void frame_free_pixels(u32* pixels);

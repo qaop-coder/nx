@@ -174,7 +174,7 @@ bool frame_loop(Frame* f)
     return true;
 }
 
-u32* frame_add_layer(Frame* f, int width, int height)
+u32* frame_add_pixels_layer(Frame* f, int width, int height)
 {
     u32*      pixels = KORE_ARRAY_ALLOC(u32, width * height);
     GfxLayer* layer  = gfx_layer_create(width, height, pixels);

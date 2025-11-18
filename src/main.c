@@ -11,10 +11,10 @@
 
 int main(int argc, char** argv)
 {
-    // KORE_UNUSED(argc);
-    // KORE_UNUSED(argv);
+    KORE_UNUSED(argc);
+    KORE_UNUSED(argv);
 
-    int $.init();
+    $.init();
 
     Memory memory = {0};
     mem_init(&memory);
@@ -23,9 +23,10 @@ int main(int argc, char** argv)
                                    WINDOW_HEIGHT * WINDOW_SCALE,
                                    "Nx (Dev.9)");
 
-    u32* screen = frame_add_layer(&main_window, WINDOW_WIDTH, WINDOW_HEIGHT);
-    u32* overlay =
-        frame_add_layer(&main_window, WINDOW_WIDTH * 2, WINDOW_HEIGHT * 2);
+    u32* screen =
+        frame_add_pixels_layer(&main_window, WINDOW_WIDTH, WINDOW_HEIGHT);
+    u32* overlay = frame_add_pixels_layer(
+        &main_window, WINDOW_WIDTH * 2, WINDOW_HEIGHT * 2);
 
     mem_load_file(&memory, 0x0000, "etc/roms/48.rom");
     mem_load_file(&memory, 0x4000, "etc/screens/AticAtac.scr");
